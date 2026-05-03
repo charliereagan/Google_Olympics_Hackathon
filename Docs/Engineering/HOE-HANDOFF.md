@@ -332,6 +332,29 @@ Two of the technical subagents hit a permissions wall (WebSearch / WebFetch deni
 | Lessons 1-5 logged | N/A (pre-repo) | N/A |
 | **Result:** All four project documents and the HoE handoff are drafted and ready for Charlie to copy into `/Users/charliereagan/projects/Google_Olympics_Hackathon`. No code yet. No GCP yet. Day 1 begins with Apache 2.0 license + GCP project + repo skeleton. | — | — |
 
+### 2026-05-03 — HoE Session 2 (Day 1 provisioning)
+
+| Change | Commit | Deployed |
+|---|---|---|
+| Role separation codified: HoE directs/reviews/tests/commits/deploys; worker agents write code. Workers never commit, never deploy. Logged as feedback memory and added to CLAUDE.md "Operating model — director, not coder" section. | (this session) | N/A |
+| `CLAUDE.md` created at repo root — alignment prompt for every coding session. | (this session) | N/A |
+| `DEPLOYMENT.md` created at repo root — deployment procedure document. | (this session) | N/A |
+| `Docs/Engineering/tech_snapshot.md` created — runtime ground truth. | (this session) | N/A |
+| `Docs/Engineering/backlog.md` created — ideas, bugs, deferred actions. | (this session) | N/A |
+| GitHub repo created at https://github.com/charliereagan/Google_Olympics_Hackathon (PRIVATE). License badge auto-detected as Apache 2.0 by GitHub. Initial commit `9d48dd7`. | `9d48dd7` | N/A |
+| ADC quota project switched to `predictive-fx-495200-j4` via `gcloud auth application-default set-quota-project` (no interactive login required). | (gcloud) | ✓ |
+| 8 APIs enabled on hackathon project: aiplatform, firestore, run, secretmanager, cloudbuild, cloudscheduler, texttospeech, artifactregistry, billingbudgets. | (gcloud) | ✓ |
+| Reachability sweep confirmed all 7 verified Gemini model IDs respond on `location='global'` and bill against `predictive-fx-495200-j4`. URL/version/verb shape per model documented in `tech_snapshot.md §3`. | (gcloud) | ✓ |
+| 30 Gemini Chirp3 HD en-US voices enumerated. **v1.2 placeholders Charon and Puck both verified to exist.** Voice catalog in `tech_snapshot.md §4`. | (gcloud) | ✓ |
+| 2 service accounts created: `agent-runtime@`, `web-frontend@`. (Note: `web` was below the 6-char SA-ID minimum; renamed `web-frontend`. Docs updated.) IAM bindings: `agent-runtime` got 8 roles (aiplatform.user, datastore.user, bigquery.dataViewer, bigquery.jobUser, storage.objectAdmin, secretmanager.secretAccessor, logging.logWriter, cloudtrace.agent); `web-frontend` got 4 (datastore.user, storage.objectViewer, logging.logWriter, run.invoker). | (gcloud) | ✓ |
+| Firestore `(default)` database created in `nam5` (US multi-region), Native mode, `REALTIME_UPDATES_MODE_ENABLED`. | (gcloud) | ✓ |
+| BigQuery: 2 datasets created (`storytellers_room`, `storytellers_room_dev`) in US multi-region; **14 tables created** (7 each: candidates, athlete_registry, historical_athletes, geography, championships, agent_call_counters, agent_errors). Schemas committed to `data/bq_schemas/*.json`. | (this session) | ✓ |
+| Cloud Storage: 3 buckets created (`storytellers-room-hero-images`, `storytellers-room-audio`, `storytellers-room-fallback-heroes`) — US multi-region, uniform bucket-level access. | (gcloud) | ✓ |
+| Artifact Registry: `storytellers-room` Docker repo created in `us-central1` for Cloud Run images. | (gcloud) | ✓ |
+| Budget alerts: 3 created ($100 informational, $200 audit, $300 kill-switch) — each with 50%, 90%, 100%, and 100%-forecasted-spend thresholds. | (gcloud) | ✓ |
+| `tech_snapshot.md` refreshed with the new ground-truth state. `DEPLOYMENT.md` updated for the `web-frontend` SA name. | (this session) | N/A |
+| **Result:** Day 1 GCP provisioning complete. No code yet. Day 2 begins agent core: Editor, Investigator, four sub-scouts, Wire vocabulary, Wire stream rendering. Outstanding Day 1 task: Day-1 voice audition (`scripts/list_tts_voices.py` per HOE-DEC-017) and athlete registry seed loader. | — | — |
+
 ### 2026-05-02 — HoE Session 1 (Stack validation pass)
 
 | Change | Commit | Deployed |

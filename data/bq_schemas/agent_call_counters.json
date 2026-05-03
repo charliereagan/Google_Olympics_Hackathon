@@ -1,0 +1,15 @@
+[
+  {"name":"counter_date","type":"DATE","mode":"REQUIRED"},
+  {"name":"agent","type":"STRING","mode":"REQUIRED"},
+  {"name":"sub_agent","type":"STRING","mode":"NULLABLE"},
+  {"name":"axis","type":"STRING","mode":"REQUIRED","description":"gemini_pro | gemini_flash | gemini_flash_lite | image_pro | image_flash | tts | grounding | deep_research"},
+  {"name":"model","type":"STRING","mode":"NULLABLE"},
+  {"name":"call_count","type":"INT64","mode":"NULLABLE"},
+  {"name":"input_tokens","type":"INT64","mode":"NULLABLE"},
+  {"name":"output_tokens","type":"INT64","mode":"NULLABLE"},
+  {"name":"images_generated","type":"INT64","mode":"NULLABLE"},
+  {"name":"audio_chars","type":"INT64","mode":"NULLABLE"},
+  {"name":"grounded_search_queries","type":"INT64","mode":"NULLABLE"},
+  {"name":"estimated_cost_usd","type":"FLOAT64","mode":"NULLABLE"},
+  {"name":"last_updated","type":"TIMESTAMP","mode":"NULLABLE"}
+]

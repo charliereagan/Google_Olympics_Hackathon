@@ -1,0 +1,31 @@
+[
+  {"name":"story_unit_id","type":"STRING","mode":"REQUIRED"},
+  {"name":"story_unit_title","type":"STRING","mode":"REQUIRED"},
+  {"name":"story_unit_type","type":"STRING","mode":"REQUIRED","description":"place | program | pattern"},
+  {"name":"region","type":"STRING","mode":"NULLABLE"},
+  {"name":"state","type":"STRING","mode":"NULLABLE"},
+  {"name":"primary_sports","type":"STRING","mode":"REPEATED"},
+  {"name":"olympic_count","type":"INT64","mode":"NULLABLE","description":"aggregate, no names"},
+  {"name":"paralympic_count","type":"INT64","mode":"NULLABLE","description":"aggregate, no names"},
+  {"name":"contributing_athlete_ids","type":"STRING","mode":"REPEATED","description":"INTERNAL — never in user-facing output"},
+  {"name":"representation_history","type":"RECORD","mode":"REPEATED","fields":[
+    {"name":"year","type":"INT64","mode":"NULLABLE"},
+    {"name":"count","type":"INT64","mode":"NULLABLE"},
+    {"name":"type","type":"STRING","mode":"NULLABLE"}
+  ]},
+  {"name":"pipeline_continuity_gaps","type":"RECORD","mode":"REPEATED","fields":[
+    {"name":"start_year","type":"INT64","mode":"NULLABLE"},
+    {"name":"end_year","type":"INT64","mode":"NULLABLE"},
+    {"name":"note","type":"STRING","mode":"NULLABLE"}
+  ]},
+  {"name":"public_evidence_refs","type":"STRING","mode":"REPEATED"},
+  {"name":"scout_scores","type":"RECORD","mode":"NULLABLE","fields":[
+    {"name":"cinderella","type":"FLOAT64","mode":"NULLABLE"},
+    {"name":"comeback","type":"FLOAT64","mode":"NULLABLE"},
+    {"name":"hometown","type":"FLOAT64","mode":"NULLABLE"},
+    {"name":"echo","type":"FLOAT64","mode":"NULLABLE"}
+  ]},
+  {"name":"aggregate_score","type":"FLOAT64","mode":"NULLABLE"},
+  {"name":"high_narrative_density","type":"BOOL","mode":"NULLABLE"},
+  {"name":"last_updated","type":"TIMESTAMP","mode":"NULLABLE"}
+]

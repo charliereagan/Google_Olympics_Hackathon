@@ -1,0 +1,14 @@
+[
+  {"name":"athlete_id","type":"STRING","mode":"REQUIRED"},
+  {"name":"sport","type":"STRING","mode":"NULLABLE"},
+  {"name":"games_year","type":"INT64","mode":"NULLABLE"},
+  {"name":"games_city","type":"STRING","mode":"NULLABLE"},
+  {"name":"games_type","type":"STRING","mode":"NULLABLE","description":"summer_olympic | winter_olympic | summer_paralympic | winter_paralympic"},
+  {"name":"placement","type":"INT64","mode":"NULLABLE","description":"1, 2, 3 — NO finish times, NO scoring data per PROJECT_BRIEF §6"},
+  {"name":"medal","type":"STRING","mode":"NULLABLE","description":"gold | silver | bronze | none"},
+  {"name":"hometown_city","type":"STRING","mode":"NULLABLE"},
+  {"name":"hometown_state","type":"STRING","mode":"NULLABLE"},
+  {"name":"noc","type":"STRING","mode":"REQUIRED","description":"Filtered to USA only — strict scope per PROJECT_BRIEF §6"},
+  {"name":"source","type":"STRING","mode":"NULLABLE"},
+  {"name":"last_updated","type":"TIMESTAMP","mode":"NULLABLE"}
+]

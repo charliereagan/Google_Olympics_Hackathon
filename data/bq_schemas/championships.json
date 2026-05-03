@@ -1,0 +1,12 @@
+[
+  {"name":"championship_id","type":"STRING","mode":"REQUIRED"},
+  {"name":"athlete_id","type":"STRING","mode":"NULLABLE"},
+  {"name":"sport","type":"STRING","mode":"NULLABLE"},
+  {"name":"event","type":"STRING","mode":"NULLABLE"},
+  {"name":"year","type":"INT64","mode":"NULLABLE"},
+  {"name":"placement","type":"INT64","mode":"NULLABLE","description":"1, 2, 3 — NO finish times, NO scoring data"},
+  {"name":"medal","type":"STRING","mode":"NULLABLE"},
+  {"name":"competition_name","type":"STRING","mode":"NULLABLE"},
+  {"name":"source","type":"STRING","mode":"NULLABLE"},
+  {"name":"last_updated","type":"TIMESTAMP","mode":"NULLABLE"}
+]
