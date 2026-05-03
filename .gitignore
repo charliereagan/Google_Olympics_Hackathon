@@ -66,6 +66,12 @@ data/fallback_heroes/*.png
 data/fallback_heroes/*.jpg
 !data/fallback_heroes/.gitkeep
 
+# Athlete registry — derivable from public sources, large; don't commit
+data/cache/
+data/athlete_registry_snapshot/registry.*.json
+data/athlete_registry_snapshot/attribution.latest.json
+!data/athlete_registry_snapshot/.gitkeep
+
 # Tests / coverage
 coverage/
 .nyc_output/
