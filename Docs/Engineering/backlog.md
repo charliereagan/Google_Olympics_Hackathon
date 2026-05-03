@@ -17,7 +17,7 @@ When the build spec is fully delivered, archive it to `Docs/Engineering/archive/
 ### Day-1 verification gates (P0; tracked here until scripts land in repo)
 
 - [defer 2026-05-02] **`scripts/verify_models.py`** — Day-1 hard gate that hits each of the seven verified model IDs on `location='global'` and asserts they respond. Currently verified manually via curl (see `tech_snapshot.md §3`). Convert to a checked-in script so future sessions can re-verify without re-thinking the URL shapes.
-- [defer 2026-05-02] **`scripts/list_tts_voices.py`** — Day-1 audition script that pulls the 30 Gemini Chirp3 HD en-US voices, generates a 30-second sample of each reading the same Broadcast paragraph, and saves them to `/audio/voice_audition/` for Charlie to A/B. Currently a manual Vertex AI curl. (HOE-DEC-017.)
+- ~~[defer 2026-05-02] **`scripts/list_tts_voices.py`** — Day-1 audition script that pulls the 30 Gemini Chirp3 HD en-US voices, generates a 30-second sample of each reading the same Broadcast paragraph, and saves them to `/audio/voice_audition/` for Charlie to A/B. Currently a manual Vertex AI curl. (HOE-DEC-017.)~~ **DONE 2026-05-03.** Worker shipped `scripts/list_tts_voices.py` (251 lines); 6 candidates auditioned; Charlie picked **Algenib** (Broadcast Narrator) + **Fenrir** (Wire Dispatcher + single-voice fallback) — HOE-DEC-025. Pinned in BUILD_SPEC §3.5 + §5.6 and tech_snapshot.md §4.
 - [defer 2026-05-02] **`scripts/check_license.sh`** — pre-commit + GH Actions CI gate per BUILD_SPEC §13 Day-1.
 - [defer 2026-05-02] **`scripts/lint_no_direct_wire_writes.py`** — CI lint rule per HOE-DEC-018.
 - [defer 2026-05-02] **`scripts/dress_rehearsal.sh`** — Day-9 demo path harness per BUILD_SPEC §20.3.

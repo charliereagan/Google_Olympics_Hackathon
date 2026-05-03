@@ -21,6 +21,7 @@ The v1.3 pass is a stack-validation + operability layer. Every locked decision i
 - All Gemini 3 family preview models are **GLOBAL-ENDPOINT ONLY**; calls to `us-central1` return 404 model-not-found. The agent runtime must `vertexai.init(project=…, location='global')`. (HOE-DEC-015.)
 - `gemini-3-pro-preview` was discontinued 2026-03-26; we use `gemini-3.1-pro-preview`. (HOE-DEC-016.)
 - The Gemini Flash TTS voice list changed: 30 prebuilt voices, accessed by name; v1.2's "Charon" / "Puck" placeholders need confirmation against `scripts/list_tts_voices.py` before any Narrator code lands. The TTS API supports inline tags (`[pause=1.0]`, `[emphasis]`, `[short pause]`, `[long pause]`, `[slow]`, `[fast]`, `[cheerful]`) for pacing control. SynthID watermark is applied to all output. (HOE-DEC-017.)
+- **Voice audition completed 2026-05-03 (HOE-DEC-025):** Broadcast Narrator = `Algenib`, Wire Dispatcher = `Fenrir`, single-voice fallback = `Fenrir`. Audition WAVs in `audio/voice_audition/` (gitignored).
 
 **Architectural pins (things v1.2 left ambiguous):**
 - The **Wire-level NIL guard runs as an in-process write-through proxy**. All agents call `wire.emit(event)`; direct `firestore.add('wire_events', …)` is forbidden (CI lint rule). Cloud Function `onCreate` triggers were considered and rejected — they race the SSE stream and would briefly leak names. (HOE-DEC-018; closes audit P0.)
@@ -136,12 +137,15 @@ Deep Research is callable as a tool but typical latency is multi-minute (the mod
 
 Model ID: `gemini-3.1-flash-tts-preview`. 30 prebuilt voices, 70+ languages. Inline tags supported: `[slow]`, `[fast]`, `[short pause]`, `[long pause]`, `[pause=1.0]`, `[emphasis]`, `[cheerful]`, and ~200 others for expressive control. SynthID watermark applied to all output.
 
-| Use | Voice config |
-|---|---|
-| Broadcast Narrator | Warm, mid-tone, documentary register. Slight gravitas, deliberate breath. **Voice name TBD on Day 1** — see verification gate below. |
-| Wire Dispatcher | Clipped, lower register, control-room/radio energy. **Voice name TBD on Day 1**. |
+| Use | Voice config | Verified |
+|---|---|---|
+| Broadcast Narrator | **`Algenib`** — warm, mid-tone, documentary register. Slight gravitas, deliberate breath. | ✓ HOE-DEC-025 (2026-05-03 audition) |
+| Wire Dispatcher | **`Fenrir`** — clipped, lower register, control-room/radio energy. | ✓ HOE-DEC-025 (2026-05-03 audition) |
+| Single-voice fallback (any future context where only one voice is used) | **`Fenrir`** | ✓ HOE-DEC-025 |
 
-**Day-1 voice verification gate (HOE-DEC-017):** before any Narrator code lands, run `scripts/list_tts_voices.py` to enumerate the 30 prebuilt voices, audition 4-6 candidates per profile, and pin the chosen voice strings into §5.6. The v1.2 placeholders "Charon" / "Puck" are not assumed valid until verified. Pulled into Day 1 (was Day 5) because Narrator voice is the Broadcast's emotional spine and we want max iteration buffer.
+Vertex AI invocation form uses the **bare voice name** (e.g., `"Algenib"`, `"Fenrir"`); Cloud TTS standalone API uses the FQN (`"en-US-Chirp3-HD-Algenib"`, `"en-US-Chirp3-HD-Fenrir"`). Same voice; two different invocation surfaces.
+
+**Day-1 voice audition (HOE-DEC-017, completed 2026-05-03):** ran `scripts/list_tts_voices.py` → enumerated 30 voices → generated 30s audition samples for 6 candidates (Charon, Algenib, Iapetus, Puck, Fenrir, Orus) reading the same place-only paragraph with `[short pause]` and `[emphasis]` inline tags. Charlie auditioned all 6 and picked Algenib + Fenrir (HOE-DEC-025). Audition WAVs preserved in `audio/voice_audition/` (gitignored).
 
 **Word-level timing for sentence highlighting:** the Gemini TTS API surface for word-timing output needs to be validated empirically on Day 5 — generate a 30s sample and inspect the response shape. If the API does not return word-level timestamps, we synthesize them client-side from sentence boundaries + audio duration heuristics (acceptable degradation; sentence-level highlighting still lands). See §7.6 audio sync architecture.
 
@@ -584,11 +588,11 @@ check).
 - Music bed mixing happens in the frontend, not in the TTS — Narrator returns clean audio.
 - The text the Narrator receives is post-Redaction. No athlete names will appear in the input.
 
-**Voice configs:** voice names TBD on Day 1 via `scripts/list_tts_voices.py` (see §3.5 verification gate). The two configs share API shape:
+**Voice configs (pinned 2026-05-03 per HOE-DEC-025).** The two configs share API shape:
 
 ```python
 broadcast_narrator_config = {
-    "voice_name": "<TBD Day 1 — warm, mid-tone, documentary>",
+    "voice_name": "Algenib",  # warm, mid-tone, documentary register
     "audio_encoding": "MP3",
     "sample_rate_hertz": 24000,
     # Pacing controlled inline via [short pause] / [long pause] / [pause=N] / [slow]
@@ -597,10 +601,14 @@ broadcast_narrator_config = {
 }
 
 wire_dispatcher_config = {
-    "voice_name": "<TBD Day 1 — clipped, lower register, control-room>",
+    "voice_name": "Fenrir",  # clipped, lower register, control-room
     "audio_encoding": "MP3",
     "sample_rate_hertz": 24000,
 }
+
+# Single-voice fallback for any future context where only one voice is used.
+# (E.g., a future "talk to the room" Tier 2 feature, or a debug emit.) Default = Fenrir.
+default_fallback_voice = "Fenrir"
 ```
 
 **Word-level timing — empirical Day-5 verification:** the Narrator implementation begins with a 30-second sample call to inspect the Gemini TTS response shape for word-level timestamps. Three outcomes:

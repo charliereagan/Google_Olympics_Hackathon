@@ -1,6 +1,6 @@
 # tech_snapshot.md — Ground truth for the runtime environment
 
-**Last refreshed:** 2026-05-03 by HoE Session 2 (Day 1 provisioning — service accounts + Firestore + BigQuery + GCS + Artifact Registry + budgets created)
+**Last refreshed:** 2026-05-03 by HoE Session 2 (Day 1 provisioning + ops scripts + voice audition complete; voices pinned per HOE-DEC-025)
 
 This file is the **runtime ground truth**: what's actually provisioned, what model IDs respond, what voices exist, what env vars are set. Refresh this on **every infra change**. Distinct from:
 - `BUILD_SPEC.md` = the plan (architecture, rules, schemas)
@@ -89,31 +89,38 @@ export GOOGLE_CLOUD_LOCATION=global
 export VERTEX_AI_LOCATION=global
 ```
 
-## 4. Gemini 3.1 Flash TTS — voice catalog
+## 4. Gemini 3.1 Flash TTS — voice catalog + pinned picks
+
+**Pinned (HOE-DEC-025, 2026-05-03):**
+- **Broadcast Narrator → `Algenib`** (Cloud TTS FQN: `en-US-Chirp3-HD-Algenib`) — warm, mid-tone, documentary register
+- **Wire Dispatcher → `Fenrir`** (Cloud TTS FQN: `en-US-Chirp3-HD-Fenrir`) — clipped, lower register, control-room
+- **Single-voice fallback → `Fenrir`** (any future context where only one voice is used)
+
+Vertex AI invocation form uses the bare voice name (`"Algenib"`, `"Fenrir"`); Cloud TTS standalone API uses the FQN.
 
 Verified via `https://texttospeech.googleapis.com/v1/voices` (2026-05-02). 2,066 total voices in Cloud TTS. The 30 Gemini Chirp3 HD en-US voices (the ones we'd use for both Broadcast Narrator and Wire Dispatcher):
 
 ```
 en-US-Chirp3-HD-Achernar
 en-US-Chirp3-HD-Achird
-en-US-Chirp3-HD-Algenib
+en-US-Chirp3-HD-Algenib         ← PINNED for Broadcast Narrator (HOE-DEC-025)
 en-US-Chirp3-HD-Algieba
 en-US-Chirp3-HD-Alnilam
 en-US-Chirp3-HD-Aoede
 en-US-Chirp3-HD-Autonoe
 en-US-Chirp3-HD-Callirrhoe
-en-US-Chirp3-HD-Charon         ← v1.2 placeholder for Broadcast Narrator (verified exists)
+en-US-Chirp3-HD-Charon         ← v1.2 placeholder, auditioned, not selected
 en-US-Chirp3-HD-Despina
 en-US-Chirp3-HD-Enceladus
 en-US-Chirp3-HD-Erinome
-en-US-Chirp3-HD-Fenrir
+en-US-Chirp3-HD-Fenrir          ← PINNED for Wire Dispatcher + single-voice fallback (HOE-DEC-025)
 en-US-Chirp3-HD-Gacrux
 en-US-Chirp3-HD-Iapetus
 en-US-Chirp3-HD-Kore
 en-US-Chirp3-HD-Laomedeia
 en-US-Chirp3-HD-Leda
 en-US-Chirp3-HD-Orus
-en-US-Chirp3-HD-Puck           ← v1.2 placeholder for Wire Dispatcher (verified exists)
+en-US-Chirp3-HD-Puck           ← v1.2 placeholder, auditioned, not selected
 en-US-Chirp3-HD-Pulcherrima
 en-US-Chirp3-HD-Rasalgethi
 en-US-Chirp3-HD-Sadachbia
@@ -126,13 +133,13 @@ en-US-Chirp3-HD-Zephyr
 en-US-Chirp3-HD-Zubenelgenubi
 ```
 
-Day 1 task per HOE-DEC-017: audition 4-6 candidates each for Broadcast Narrator (warm, mid-tone, documentary) and Wire Dispatcher (clipped, lower register, control-room) and pin the chosen voice strings into BUILD_SPEC §3.5 + §5.6. The placeholders Charon and Puck are real — they're starting candidates, not assumed picks.
+Day-1 audition completed 2026-05-03. Six candidates auditioned (Charon, Algenib, Iapetus, Puck, Fenrir, Orus) → Algenib + Fenrir picked (HOE-DEC-025).
 
 **Vertex AI invocation form** (use bare name):
 ```json
 {
   "speechConfig": {
-    "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": "Charon" } }
+    "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": "Algenib" } }
   }
 }
 ```
