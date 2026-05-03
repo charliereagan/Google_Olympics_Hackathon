@@ -1,0 +1,6 @@
+# Day-1 operational scripts dependencies.
+# Kept minimal on purpose: no Vertex AI SDK, no firebase-admin, no extras.
+# verify_models.py and list_tts_voices.py call Vertex AI + Cloud TTS via raw
+# REST + a google-auth ADC token, so this is the entire dependency surface.
+google-auth>=2.28.0
+requests>=2.31.0

@@ -61,6 +61,7 @@ ui-debug.log
 # Generated media (regenerated on demand; not source of truth)
 audio/cache/
 audio/generated/
+audio/voice_audition/
 data/fallback_heroes/*.png
 data/fallback_heroes/*.jpg
 !data/fallback_heroes/.gitkeep
