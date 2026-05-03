@@ -1,6 +1,6 @@
 # tech_snapshot.md — Ground truth for the runtime environment
 
-**Last refreshed:** 2026-05-03 by HoE Session 2 (Day 1 provisioning + ops scripts + voice audition complete; voices pinned per HOE-DEC-025)
+**Last refreshed:** 2026-05-03 by HoE Session 2 (Day 1 provisioning + ops scripts + voice audition + athlete-registry seed + agent-runtime skeleton plan complete)
 
 This file is the **runtime ground truth**: what's actually provisioned, what model IDs respond, what voices exist, what env vars are set. Refresh this on **every infra change**. Distinct from:
 - `BUILD_SPEC.md` = the plan (architecture, rules, schemas)
@@ -163,7 +163,7 @@ Output is watermarked with **SynthID** automatically.
 |---|---|---|
 | Firestore | ✓ `(default)` database in `nam5` (US multi-region), `FIRESTORE_NATIVE`, `REALTIME_UPDATES_MODE_ENABLED` | Created 2026-05-03 |
 | BigQuery datasets | ✓ `storytellers_room` (production) + `storytellers_room_dev` (local dev mirror) — both in `US` multi-region | Created 2026-05-03 |
-| BigQuery tables (×7 each, 14 total) | ✓ `candidates`, `athlete_registry`, `historical_athletes`, `geography`, `championships`, `agent_call_counters`, `agent_errors` | Schemas in `/tmp/bq_schemas/*.json` (also embedded in BUILD_SPEC §8); seeding pending |
+| BigQuery tables (×7 each, 14 total) | ✓ `candidates`, `athlete_registry`, `historical_athletes`, `geography`, `championships`, `agent_call_counters`, `agent_errors` | Schemas in `data/bq_schemas/*.json` (committed). **`athlete_registry` seeded 2026-05-03: 11,188 rows in production (`storytellers_room`), 11,188 rows in dev (`storytellers_room_dev`).** Source: KeithGalli/Olympics-Dataset (Olympedia public CSVs filtered NOC=USA) + Wikidata SPARQL (12 Olympic + 19 Paralympic medalist cross-reference). Loader at `data/load_athlete_registry/`. |
 | Cloud Storage buckets | ✓ `gs://storytellers-room-hero-images`, `gs://storytellers-room-audio`, `gs://storytellers-room-fallback-heroes` (US multi-region, uniform bucket-level access) | Created 2026-05-03; all empty |
 | Artifact Registry | ✓ `storytellers-room` (Docker, `us-central1`) | Created 2026-05-03 for Cloud Run image storage |
 | Cloud Run | **Empty** — no services yet | Pending: deploy `agent-runtime` + `web` |

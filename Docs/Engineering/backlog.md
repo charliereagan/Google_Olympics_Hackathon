@@ -24,6 +24,18 @@ When the build spec is fully delivered, archive it to `Docs/Engineering/archive/
 - [defer 2026-05-02] **`scripts/teardown_team_usa_data.sh`** — post-judging data destruction per PROJECT_BRIEF §6 (run on or after June 16, 2026).
 - [defer 2026-05-02] **`scripts/check_devpost_updates.py`** — daily 8am cron / GH Action per BUILD_SPEC §20.4.
 
+### Athlete-registry coverage gaps (2026-05-03; from HOE-DEC-028 loader review)
+
+- [defer 2026-05-03] **Paralympic coverage in the registry is thin (~19 records).** The KeithGalli Olympedia scrape is Olympic-only; Wikidata's `wdt:P166` Paralympic-medal triples are sparse. Total registry is 11,188 rows but Paralympic representation is under-covered. **Risk:** the NIL Layer has higher false-negative risk on Paralympic athlete names. **Mitigation:** layer Team USA roster scrape (`teamusa.com/athletes`) onto the loader during Days 2-3 to extend Paralympic coverage. Tracked here until done.
+- [defer 2026-05-03] **Sport-name variants normalized to "Aquatics" instead of "Swimming"** in some Olympedia records (Phelps shows `sport='Aquatics'`). Affects Investigator queries that filter by sport family. Easy fix in `data/load_athlete_registry/fetch_olympedia.py::_enrich_with_results` (one-line tweak in the family-name extraction). Defer until Day 3 when Investigator code lands.
+- [defer 2026-05-03] **`era_or_decade` is birth-decade, not competition-decade** in the registry. BUILD_SPEC §5.7's near-id heuristic (sport + hometown + event + year) implies birth-decade is acceptable, but if the Day-6/7 Layer wants competition-decade for tighter near-id checks, change `merge._from_olympedia` to use `min(games_years)` instead of `birth_year`. Tracked.
+- [defer 2026-05-03] **Birth year missing for ~25% of Olympedia records** triggers loose-match dedup (first, last) without year. May cause minor over-merging of distinct same-named athletes, which is preferable to under-coverage. Backlog item: revisit if Day-9 spot-checks find specific over-merge cases.
+
+### Day-2 implementation handoff prep (2026-05-03)
+
+- [defer 2026-05-03] **Agent-runtime skeleton plan ready at `Docs/Engineering/plans/agent-runtime-skeleton-v1.md`.** When ready, spawn an implementation worker with that plan as the binding spec. Worker writes files in the topo-sorted order from §H. HoE reviews + tests + commits. Each step independently testable with `pytest -x`.
+- [defer 2026-05-03] **`ATHLETE_REGISTRY_DATASET` env var** added to the plan's §E. Default `storytellers_room` (production); override `storytellers_room_dev` for local. NIL Layer reads from this.
+
 ### Spec corrections from reachability sweep (2026-05-02)
 
 - [defer 2026-05-02] **BUILD_SPEC §3.1 — note Vertex API version split.** Verified probes show `gemini-3.1-pro-preview` is on `v1` while the rest of the Gemini 3 family (Flash, Flash-Lite, Image variants, TTS) are on `v1beta1`. Default the agent runtime SDK calls to `v1beta1` for safety; override to `v1` only for Pro. (Currently the spec doesn't pin a version.)
