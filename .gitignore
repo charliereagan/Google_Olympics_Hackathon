@@ -1,0 +1,70 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code (local session state, not for repo)
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.turbo/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Env / secrets — NEVER COMMIT
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+gcp-credentials*.json
+
+# GCP / build artifacts
+.gcloudignore.local
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Generated media (regenerated on demand; not source of truth)
+audio/cache/
+audio/generated/
+data/fallback_heroes/*.png
+data/fallback_heroes/*.jpg
+!data/fallback_heroes/.gitkeep
+
+# Tests / coverage
+coverage/
+.nyc_output/
