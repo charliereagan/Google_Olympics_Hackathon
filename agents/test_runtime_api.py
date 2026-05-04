@@ -255,3 +255,51 @@ async def test_investigate_returns_503_when_runtime_not_ready(monkeypatch):
     req = _FakeRequest({"prompt": "test", "compression_factor": 0.25})
     resp = await _handle_investigate(req)
     assert resp.status_code == 503
+
+
+# -- /health/agents vocabulary diagnostics ------------------------------------
+
+
+def test_health_agents_reports_vocabulary_loaded(monkeypatch):
+    """`/health/agents` includes vocabulary_loaded + vocabulary_fragment_count
+    (BUILD_SPEC §6.4)."""
+    from fastapi.testclient import TestClient
+
+    state = _empty_state()
+    fake_vocab = mock.Mock()
+    fake_vocab.agents = mock.Mock(return_value=["editor", "cinderella_scout"])
+    fake_vocab.total_fragments = mock.Mock(side_effect=lambda agent: {
+        "editor": 50,
+        "cinderella_scout": 60,
+    }[agent])
+    state.wire_vocabulary = fake_vocab
+    monkeypatch.setattr(runtime, "_state", state)
+
+    # Build a fresh app with no lifespan side-effects (state is already set).
+    app = runtime._build_app()
+    client = TestClient(app)
+
+    resp = client.get("/health/agents")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["vocabulary_loaded"] is True
+    assert body["vocabulary_fragment_count"] == 110
+
+
+def test_health_agents_reports_vocabulary_unloaded(monkeypatch):
+    """When `RuntimeState.wire_vocabulary` is None, the response surfaces
+    vocabulary_loaded=False + count=0."""
+    from fastapi.testclient import TestClient
+
+    state = _empty_state()
+    state.wire_vocabulary = None
+    monkeypatch.setattr(runtime, "_state", state)
+
+    app = runtime._build_app()
+    client = TestClient(app)
+
+    resp = client.get("/health/agents")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["vocabulary_loaded"] is False
+    assert body["vocabulary_fragment_count"] == 0

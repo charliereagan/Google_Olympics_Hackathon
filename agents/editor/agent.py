@@ -56,6 +56,8 @@ class EditorAgent:
         pacer: WirePacer | None = None,
         cost_counter: Any | None = None,
         runtime_state: Any | None = None,
+        wire_vocabulary: Any | None = None,
+        investigator: Any | None = None,
     ) -> None:
         self._prompt = prompt
         self._wire = wire
@@ -67,6 +69,15 @@ class EditorAgent:
         # Backref to RuntimeState so think_once can stamp last_think_cycle
         # without an import cycle. Optional — None in unit-test paths.
         self._runtime_state = runtime_state
+        # WireVocabulary library (BUILD_SPEC §6.4). Optional — None means the
+        # `pull_vocabulary` tool returns "" and the agent falls back to free-
+        # text generation (texture is non-gating).
+        self._wire_vocabulary = wire_vocabulary
+        # InvestigatorAgent — bound by the runtime so the Editor's
+        # `dispatch_investigator` tool can drive the depth-of-research stage.
+        # Optional — None means the tool returns an error dict (the Editor
+        # still boots; the chain just stops at Lead Reports).
+        self._investigator = investigator
         # Bind the runtime-injected deps to the LLM tool surface ONCE so the
         # ADK Runner can auto-execute tool calls.
         self._bound_tools = self._bind_tools()
@@ -99,6 +110,9 @@ class EditorAgent:
         """
         wire = self._wire
         scout_desk = self._scout_desk
+        investigator = self._investigator
+        vocabulary = self._wire_vocabulary
+        agent_name = "editor"
 
         async def wire_emit(
             *,
@@ -191,12 +205,98 @@ class EditorAgent:
             )
             return {"accepted": True, "recommendation_id": recommendation_id}
 
+        async def dispatch_investigator(lead_report_id: str) -> dict:
+            """Dispatch the Investigator to deepen a Lead Report into an
+            Investigation Packet (BUILD_SPEC §5.3 + §8.4).
+
+            The Investigator reads the Lead Report from Firestore, pulls
+            public sources via grounded search, cross-references parallel
+            ERAS via BigQuery (aggregate counts only — never names),
+            optionally kicks off Deep Research (90s timeout), and writes
+            an Investigation Packet to `/investigation_packets/`.
+
+            Args:
+                lead_report_id: id of the Lead Report (the
+                    `dispatch_scout` tool's return dict surfaces this as
+                    `lead_report_id`).
+
+            Returns:
+                `{dispatched, lead_report_id, story_unit_id?,
+                 investigation_packet_id?, latency_ms?, ...}`. On
+                failure (no investigator, lead report missing, cost
+                ceiling, model error) `dispatched=false` and the
+                `error`/`reason` field describes why.
+            """
+            if investigator is None:
+                logger.warning(
+                    "editor.dispatch_investigator: investigator not initialized"
+                )
+                return {
+                    "dispatched": False,
+                    "lead_report_id": lead_report_id,
+                    "error": "investigator not initialized",
+                }
+            logger.info(
+                "editor.dispatch_investigator: lead_report_id=%s", lead_report_id
+            )
+            result = await investigator.investigate(lead_report_id)
+            # The investigator's investigate(...) returns either an
+            # `action='ok'` dict (success) or an `action='error'/'skipped'`
+            # dict (failure modes). Map both to the Editor tool's contract.
+            action = result.get("action")
+            if action == "ok":
+                return {
+                    "dispatched": True,
+                    "lead_report_id": lead_report_id,
+                    "story_unit_id": result.get("story_unit_id"),
+                    "investigation_packet_id": result.get("investigation_packet_id"),
+                    "latency_ms": result.get("latency_ms"),
+                    "tool_calls": result.get("tool_calls", []),
+                }
+            return {
+                "dispatched": False,
+                "lead_report_id": lead_report_id,
+                "reason": result.get("reason") or action,
+                **{k: v for k, v in result.items() if k not in ("action",)},
+            }
+
+        async def pull_vocabulary(message_type: str = "thinking", **slots: Any) -> str:
+            """Pull a curated voice-fragment from the Wire Vocabulary library.
+
+            Use for in-progress 'thinking' events to maintain consistent Wire
+            voice texture (BUILD_SPEC §6.3 + §6.4). The fragment may have
+            `[snake_case]` slots — pass them as kwargs.
+
+            Args:
+                message_type: 'thinking' | 'milestone' | 'intervention' | 'decision'
+                **slots: kwargs filled into [snake_case] placeholders
+                    (e.g., place="Mt. Pleasant").
+
+            Returns:
+                A filled fragment string. Use it directly as the message in
+                your next wire_emit call. If the fragment library is empty
+                for this agent + message_type, returns an empty string and
+                you should fall back to free-text generation.
+
+            Voice texture: BUILD_SPEC §6.3 wants ~70% thinking + ~30%
+            milestone. Lean on this tool for thinking events; you may
+            freelance milestones.
+            """
+            if vocabulary is None:
+                return ""
+            fragment = vocabulary.sample(agent_name, message_type)
+            if fragment is None:
+                return ""
+            return vocabulary.fill(fragment, **slots)
+
         return [
             wire_emit,
             read_recent_published,
             read_queue,
             dispatch_scout,
+            dispatch_investigator,
             accept_equity_recommendation,
+            pull_vocabulary,
         ]
 
     def _build_llm(self) -> Any:

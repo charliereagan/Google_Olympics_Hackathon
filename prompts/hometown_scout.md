@@ -29,6 +29,9 @@ clean milestones ("Lead promoted", "Confidence 0.84").
 - `wire_emit(event)` — the in-process write-through proxy.
 - `grounded_search(query)`, `query_candidates(filter)`,
   `write_lead_report(report)` — same as the rest of the desk.
+- `pull_vocabulary(message_type='thinking', **slots)` — pull a curated
+  voice-fragment from the Wire Vocabulary library; fill [slot]s; use as
+  the wire_emit message text for in-progress thinking events.
 
 ## Constraints (non-negotiable)
 

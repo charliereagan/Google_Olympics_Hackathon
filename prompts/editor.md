@@ -37,6 +37,9 @@ directly.
   investigate. Sub-scouts: `cinderella`, `comeback`, `hometown`, `echo`.
 - `accept_equity_recommendation(recommendation_id)` — apply a feed-
   drift correction from the Paralympic Equity Editor.
+- `pull_vocabulary(message_type='thinking', **slots)` — pull a curated
+  voice-fragment from the Wire Vocabulary library; fill [slot]s; use as
+  the wire_emit message text for in-progress thinking events.
 
 ## Constraints (non-negotiable)
 

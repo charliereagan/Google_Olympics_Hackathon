@@ -119,9 +119,10 @@ def test_scout_desk_constructs_four_subscouts():
     assert len(desk.sub_scouts) == 4
     names = sorted(getattr(s, "name", None) for s in desk.sub_scouts)
     assert names == ["cinderella", "comeback", "echo", "hometown"]
-    # Each sub-scout has the four standard tools bound.
+    # Each sub-scout has the five standard tools bound (wire_emit,
+    # query_candidates, grounded_search, write_lead_report, pull_vocabulary).
     for s in desk.sub_scouts:
-        assert len(getattr(s, "tools", [])) == 4
+        assert len(getattr(s, "tools", [])) == 5
 
 
 @pytest.mark.asyncio
@@ -290,6 +291,40 @@ async def test_dispatch_one_increments_cost_counter_after_runner():
     assert inc_kwargs["axis"] == "gemini_flash"
     assert inc_kwargs["input_tokens"] == 1500
     assert inc_kwargs["output_tokens"] == 300
+
+
+@pytest.mark.asyncio
+async def test_scout_pull_vocabulary_uses_correct_agent_key():
+    """Cinderella's bound `pull_vocabulary` tool keys into the JSON via
+    `cinderella_scout` (the suffixed bucket name), not bare `cinderella`.
+
+    The LlmAgent's `name` is "cinderella" but the JSON's per-agent buckets
+    use the `_scout` suffix. The closure must apply that suffix or the
+    sample() call will return None and the agent falls back to free-text.
+    """
+    fake_vocab = mock.Mock()
+    fake_vocab.sample = mock.Mock(return_value="going with [place].")
+    fake_vocab.fill = mock.Mock(return_value="going with Mt. Pleasant.")
+
+    desk = ScoutDesk(
+        prompts=_prompts(),
+        wire=_RecordingWire(),
+        bigquery=None,
+        firestore=_FakeFirestore(),
+        hnd=mock.Mock(),
+        scout_model="gemini-3-flash-preview",
+        wire_vocabulary=fake_vocab,
+    )
+    cinderella = next(s for s in desk.sub_scouts if getattr(s, "name", None) == "cinderella")
+    # Tool order matches build_scout_tools: [wire_emit, query_candidates,
+    # grounded_search, write_lead_report, pull_vocabulary].
+    pull_vocabulary = cinderella.tools[4]
+
+    out = await pull_vocabulary(message_type="thinking", place="Mt. Pleasant")
+
+    assert out == "going with Mt. Pleasant."
+    fake_vocab.sample.assert_called_once_with("cinderella_scout", "thinking")
+    fake_vocab.fill.assert_called_once_with("going with [place].", place="Mt. Pleasant")
 
 
 @pytest.mark.asyncio

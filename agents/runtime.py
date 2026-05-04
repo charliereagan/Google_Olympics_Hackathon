@@ -33,8 +33,10 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import uuid
+import warnings
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -51,6 +53,11 @@ try:
 except ImportError:  # pragma: no cover
     _FastAPIRequest = None  # type: ignore[assignment]
 
+# Wire vocabulary library (BUILD_SPEC §6.4). Pure stdlib — no third-party
+# imports — so this module-level import is safe on any host. Lifespan loads
+# the JSON once at boot and stores the instance on RuntimeState.
+from agents.wire.vocabulary import WireVocabulary
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +73,7 @@ class RuntimeState:
     boot_time: datetime
     editor: Any = None
     scout_desk: Any = None
+    investigator: Any = None
     nil_layer: Any = None
     wire_emitter: Any = None
     pacer_factory: Callable[[float], Any] | None = None
@@ -75,6 +83,7 @@ class RuntimeState:
     storage: Any = None
     prompts: dict[str, str] = field(default_factory=dict)
     streaming_profiles: dict[str, Any] = field(default_factory=dict)
+    wire_vocabulary: Any = None
     autonomous_task: asyncio.Task | None = None
     hnd_detector: Any = None
     placeholder_agents: dict[str, Any] = field(default_factory=dict)
@@ -86,6 +95,86 @@ class RuntimeState:
     # Active live-investigation task; only one at a time (BUILD_SPEC §6.10).
     active_live_investigation: asyncio.Task | None = None
     active_live_investigation_id: str | None = None
+
+
+# ----- Cosmetic boot warning filters ------------------------------------------
+
+
+# Logging filter for the google-genai "non-text parts in the response" message.
+# That warning fires every time an agent uses tool/function calls (which is
+# every think-cycle for our agentic flow); the message tells us the SDK's text
+# accessor concatenated text parts, which is exactly what we want it to do.
+# Filter the SPECIFIC pattern, not the entire google.genai logger — real errors
+# (auth failures, quota, etc.) should still surface.
+_GENAI_NON_TEXT_PARTS_PATTERN = re.compile(
+    r"there are non-text parts in the response", re.IGNORECASE
+)
+
+
+class _GenaiNonTextPartsFilter(logging.Filter):
+    """Drop the google.genai 'non-text parts in the response' warning."""
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return _GENAI_NON_TEXT_PARTS_PATTERN.search(msg) is None
+
+
+def _configure_logging() -> None:
+    """Filter Day-3-smoke-test cosmetic boot warnings.
+
+    Three sources, all harmless but noisy:
+
+      1. ``authlib.jose module is deprecated, please use joserfc instead.``
+         A `DeprecationWarning` (subclass `AuthlibDeprecationWarning`) raised
+         when google-auth's transitive deps import `authlib.jose`. We can't
+         fix the upstream import; suppress on `module='authlib.*'`.
+
+      2. ``[EXPERIMENTAL] feature FeatureName.PLUGGABLE_AUTH is enabled.``
+         A `UserWarning` from `google.adk.utils.feature_decorator` whenever
+         an experimental ADK feature is constructed. We don't use the
+         pluggable-auth surface; filter only the PLUGGABLE_AUTH message.
+         (The bypass env var ADK_SUPPRESS_EXPERIMENTAL_FEATURE_WARNINGS would
+         silence ALL experimental warnings — too broad. We want surgical.)
+
+      3. ``Warning: there are non-text parts in the response: ['function_call'],
+         returning concatenated text result from text parts.`` A
+         `logger.warning(...)` from `google.genai.types`. Not a `warnings.warn`
+         — has to be filtered via a logging.Filter installed on `google.genai`.
+
+    The principle: filter SPECIFIC noisy messages, not whole loggers, so any
+    future legitimate warning still surfaces. Idempotent — safe to call once
+    per process.
+    """
+    # 1. authlib.jose deprecation.
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        module=r"authlib\..*",
+    )
+    # The authlib deprecate helper uses a custom subclass; cover both.
+    try:
+        from authlib.deprecate import AuthlibDeprecationWarning  # type: ignore[import-untyped]
+
+        warnings.filterwarnings("ignore", category=AuthlibDeprecationWarning)
+    except ImportError:
+        pass
+
+    # 2. ADK PLUGGABLE_AUTH experimental warning. The decorator emits a
+    # UserWarning containing 'FeatureName.PLUGGABLE_AUTH'.
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*FeatureName\.PLUGGABLE_AUTH.*",
+        category=UserWarning,
+    )
+
+    # 3. google-genai 'non-text parts in the response' logger.warning.
+    genai_logger = logging.getLogger("google_genai.types")
+    genai_logger.addFilter(_GenaiNonTextPartsFilter())
+    # The module's logger name is module-derived; cover the legacy name too.
+    logging.getLogger("google.genai.types").addFilter(_GenaiNonTextPartsFilter())
 
 
 # ----- Config validation ------------------------------------------------------
@@ -259,7 +348,6 @@ def _build_placeholder_agents(prompts: dict[str, str], model_id: str) -> dict[st
         "constructs the shell so the seven-cast surface is complete."
     )
     names = [
-        "investigator",
         "equity_editor",
         "storyteller",
         "narrator",
@@ -311,6 +399,9 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
     """
     global _state
 
+    # 0. Cosmetic warning filters (Day-3 smoke-test cleanup).
+    _configure_logging()
+
     # 1. Env validation
     env = _validate_env()
 
@@ -330,6 +421,18 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
     # 5. Streaming profiles
     streaming_profiles = _load_streaming_profiles(REPO_ROOT)
 
+    # 5b. Wire vocabulary library (BUILD_SPEC §6.4). Texture-only — failure
+    # to load is non-fatal; agents fall back to free-text generation.
+    try:
+        wire_vocabulary = WireVocabulary.load()
+        logger.info(
+            "wire_vocabulary: loaded %d total fragments",
+            sum(wire_vocabulary.total_fragments(a) for a in wire_vocabulary.agents()),
+        )
+    except Exception:
+        logger.exception("wire_vocabulary load failed; agents will use free-text fallback")
+        wire_vocabulary = None
+
     # 6. NIL layer bootstrap (fail-closed)
     nil_layer = _bootstrap_nil_layer(bq_client, env)
 
@@ -346,10 +449,11 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         logger.exception("cost_counter recover failed; continuing fresh")
     cost_counter.start_flush_loop()
 
-    # 9. HND detector + Scout Desk + Editor
+    # 9. HND detector + Scout Desk + Investigator + Editor
     from agents.scouts.hnd_detector import HndDetector
     from agents.scouts.desk import ScoutDesk
     from agents.editor.agent import EditorAgent
+    from agents.investigator.agent import InvestigatorAgent
 
     hnd = HndDetector(
         firestore=fs_client,
@@ -364,6 +468,18 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         hnd=hnd,
         scout_model=env["model_scouts"],
         cost_counter=cost_counter,
+        wire_vocabulary=wire_vocabulary,
+    )
+    # Investigator (Day-4): Pro-tier; depth-of-research synthesis. Mirrors
+    # the EditorAgent constructor shape — see agents/investigator/agent.py.
+    investigator = InvestigatorAgent(
+        prompt=prompts["investigator"],
+        wire=wire_emitter,
+        firestore=fs_client,
+        bigquery=bq_client,
+        model_id=env["model_editor"],  # Pro tier per BUILD_SPEC §3.1
+        cost_counter=cost_counter,
+        wire_vocabulary=wire_vocabulary,
     )
     # NOTE: editor.runtime_state is set AFTER RuntimeState construction
     # below, but EditorAgent already stores the ref so the assignment lands.
@@ -374,6 +490,8 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         firestore=fs_client,
         model_id=env["model_editor"],
         cost_counter=cost_counter,
+        wire_vocabulary=wire_vocabulary,
+        investigator=investigator,
     )
     placeholder_agents = _build_placeholder_agents(prompts, env["model_editor"])
 
@@ -393,6 +511,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         boot_time=datetime.now(timezone.utc),
         editor=editor,
         scout_desk=scout_desk,
+        investigator=investigator,
         nil_layer=nil_layer,
         wire_emitter=wire_emitter,
         cost_counter=cost_counter,
@@ -401,6 +520,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         storage=storage_client,
         prompts=prompts,
         streaming_profiles=streaming_profiles,
+        wire_vocabulary=wire_vocabulary,
         autonomous_task=autonomous_task,
         hnd_detector=hnd,
         placeholder_agents=placeholder_agents,
@@ -409,6 +529,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
     # Backref so editor.think_once() can stamp last_think_cycle on
     # RuntimeState — done after construction to break the chicken-and-egg.
     editor._runtime_state = _state  # type: ignore[attr-defined]
+    investigator._runtime_state = _state  # type: ignore[attr-defined]
     logger.info("agent-runtime: boot complete")
 
     try:
@@ -704,9 +825,37 @@ def _build_app():
             agents["editor"] = {"name": getattr(s.editor, "name", "editor"), "status": "idle"}
         if s.scout_desk is not None:
             agents["scout_desk"] = {"name": "scout_desk", "status": "idle"}
+        if s.investigator is not None:
+            agents["investigator"] = {
+                "name": getattr(s.investigator, "name", "investigator"),
+                "status": "idle",
+            }
         for name, a in s.placeholder_agents.items():
             agents[name] = {"name": getattr(a, "name", name), "status": "shell"}
-        return {"agents": agents, "streaming_profiles": s.streaming_profiles}
+
+        # Wire vocabulary diagnostics (BUILD_SPEC §6.4). `vocabulary_loaded`
+        # signals whether agents will get curated voice texture or fall back
+        # to free-text. `vocabulary_fragment_count` is the total across
+        # every agent + message_type bucket.
+        if s.wire_vocabulary is not None:
+            try:
+                fragment_count = sum(
+                    s.wire_vocabulary.total_fragments(a)
+                    for a in s.wire_vocabulary.agents()
+                )
+            except Exception:
+                fragment_count = 0
+            vocabulary_loaded = True
+        else:
+            fragment_count = 0
+            vocabulary_loaded = False
+
+        return {
+            "agents": agents,
+            "streaming_profiles": s.streaming_profiles,
+            "vocabulary_loaded": vocabulary_loaded,
+            "vocabulary_fragment_count": fragment_count,
+        }
 
     return app
 

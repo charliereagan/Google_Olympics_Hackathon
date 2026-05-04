@@ -221,6 +221,66 @@ async def test_dispatch_scout_calls_scout_desk():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_investigator_calls_investigator_investigate():
+    """Editor's bound `dispatch_investigator` tool forwards to
+    investigator.investigate(lead_report_id) and returns the success shape.
+    """
+    investigator = mock.Mock()
+    investigator.investigate = mock.AsyncMock(
+        return_value={
+            "action": "ok",
+            "lead_report_id": "lead-001",
+            "story_unit_id": "us-ia-mt-pleasant",
+            "investigation_packet_id": "pkt-001",
+            "tool_calls": [{"name": "grounded_search", "args": {}}],
+            "latency_ms": 1234,
+            "input_tokens": 4200,
+            "output_tokens": 890,
+        }
+    )
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+        investigator=investigator,
+    )
+    dispatch_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "dispatch_investigator"
+    )
+    result = await dispatch_tool("lead-001")
+
+    assert result["dispatched"] is True
+    assert result["lead_report_id"] == "lead-001"
+    assert result["investigation_packet_id"] == "pkt-001"
+    assert result["story_unit_id"] == "us-ia-mt-pleasant"
+    investigator.investigate.assert_awaited_once_with("lead-001")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_investigator_returns_error_when_uninitialized():
+    """Without an investigator instance, the tool returns dispatched=False."""
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+    )
+    dispatch_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "dispatch_investigator"
+    )
+    result = await dispatch_tool("lead-001")
+    assert result["dispatched"] is False
+    assert "error" in result
+    assert "investigator" in result["error"].lower()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_scout_returns_unknown_scout_error():
     """Calling dispatch_scout with an unknown scout_id returns an error dict
     and does NOT invoke scout_desk.dispatch_one."""
@@ -242,6 +302,39 @@ async def test_dispatch_scout_returns_unknown_scout_error():
     assert "error" in result
     assert "unknown scout_id" in result["error"]
     scout_desk.dispatch_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pull_vocabulary_tool_returns_filled_fragment():
+    """Editor's bound `pull_vocabulary` tool calls WireVocabulary.sample +
+    fill and returns the filled string.
+
+    BUILD_SPEC §6.4 — the LLM-facing tool wraps the loader; if the library
+    returns a fragment, fill() resolves [slot]s and the result is returned
+    as-is for the next wire_emit call.
+    """
+    fake_vocab = mock.Mock()
+    fake_vocab.sample = mock.Mock(return_value="going with [place].")
+    fake_vocab.fill = mock.Mock(return_value="going with Mt. Pleasant.")
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+        wire_vocabulary=fake_vocab,
+    )
+    pull_vocabulary = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "pull_vocabulary"
+    )
+
+    out = await pull_vocabulary(message_type="thinking", place="Mt. Pleasant")
+
+    assert out == "going with Mt. Pleasant."
+    fake_vocab.sample.assert_called_once_with("editor", "thinking")
+    fake_vocab.fill.assert_called_once_with("going with [place].", place="Mt. Pleasant")
 
 
 @pytest.mark.asyncio

@@ -227,6 +227,18 @@ def test_fill_handles_repeated_placeholders(vocab: WireVocabulary) -> None:
     assert out == "Mount Pleasant → Mount Pleasant"
 
 
+def test_fill_handles_bracket_style_slots(vocab: WireVocabulary) -> None:
+    """`[place]` is the canonical placeholder style (HOE-DEC-032)."""
+    out = vocab.fill("Going with [place].", place="Mt. Pleasant")
+    assert out == "Going with Mt. Pleasant."
+
+
+def test_fill_handles_mixed_styles(vocab: WireVocabulary) -> None:
+    """Both `[snake_case]` and `{snake_case}` substitute in the same fragment."""
+    out = vocab.fill("[a] {b}", a="x", b="y")
+    assert out == "x y"
+
+
 # ----- Loader edge cases -----------------------------------------------------
 
 

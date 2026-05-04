@@ -31,11 +31,12 @@ def build_cinderella_scout(
     hnd: Any | None = None,
     cost_counter: Any | None = None,
     tools: list[Any] | None = None,
+    wire_vocabulary: Any | None = None,
 ) -> Any:
     """Construct the Cinderella sub-scout LlmAgent with bound tools.
 
     `tools` is an optional override (used by unit tests that want a custom
-    tool list). When omitted, the four standard scout tools are bound from
+    tool list). When omitted, the five standard scout tools are bound from
     the runtime deps.
     """
     return _build_scout(
@@ -48,6 +49,7 @@ def build_cinderella_scout(
         hnd=hnd,
         cost_counter=cost_counter,
         tools=tools,
+        wire_vocabulary=wire_vocabulary,
     )
 
 
@@ -62,6 +64,7 @@ def _build_scout(
     hnd: Any | None,
     cost_counter: Any | None,
     tools: list[Any] | None,
+    wire_vocabulary: Any | None = None,
 ) -> Any:
     bound_tools = list(tools) if tools is not None else build_scout_tools(
         scout=name,  # type: ignore[arg-type]
@@ -71,6 +74,7 @@ def _build_scout(
         hnd=hnd,
         cost_counter=cost_counter,
         grounded_model=model,
+        wire_vocabulary=wire_vocabulary,
     )
     try:
         from google.adk.agents import LlmAgent  # type: ignore[import-untyped]

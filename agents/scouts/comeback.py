@@ -17,6 +17,7 @@ def build_comeback_scout(
     hnd: Any | None = None,
     cost_counter: Any | None = None,
     tools: list[Any] | None = None,
+    wire_vocabulary: Any | None = None,
 ) -> Any:
     return _build_scout(
         "comeback",
@@ -28,4 +29,5 @@ def build_comeback_scout(
         hnd=hnd,
         cost_counter=cost_counter,
         tools=tools,
+        wire_vocabulary=wire_vocabulary,
     )

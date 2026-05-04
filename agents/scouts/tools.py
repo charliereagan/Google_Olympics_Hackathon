@@ -1,6 +1,6 @@
 """Scout-side tool surfaces.
 
-Each sub-scout (Cinderella, Comeback, Hometown, Echo) gets the same four
+Each sub-scout (Cinderella, Comeback, Hometown, Echo) gets the same five
 runtime tools:
 
   - `wire_emit(message, ...)` — the in-process write-through proxy.
@@ -8,6 +8,9 @@ runtime tools:
   - `grounded_search(query)` — Gemini Google Search grounding.
   - `write_lead_report(...)` — persist a Lead Report to Firestore + feed
     the HND detector.
+  - `pull_vocabulary(message_type, **slots)` — draw a voice-fragment from
+    the Wire Vocabulary library (BUILD_SPEC §6.4) for in-progress
+    thinking events.
 
 Voice differs only via the prompt file (CONSTITUTION Rule 1, Law 2). The
 Python here contains zero voice text.
@@ -50,8 +53,9 @@ def build_scout_tools(
     hnd: Any | None = None,
     cost_counter: Any | None = None,
     grounded_model: str = "gemini-3-flash-preview",
+    wire_vocabulary: Any | None = None,
 ) -> list[Any]:
-    """Build the four scout tools as closures over runtime deps.
+    """Build the five scout tools as closures over runtime deps.
 
     Each sub-scout calls this at construction time (see `cinderella.py`,
     `comeback.py`, `hometown.py`, `echo.py`). The closures keep Wire,
@@ -60,6 +64,12 @@ def build_scout_tools(
 
     `scout` is the sub-agent name; baked into Lead Reports + cost counter
     increments so HND attributes correctly.
+
+    `wire_vocabulary` is the WireVocabulary library (BUILD_SPEC §6.4). The
+    `pull_vocabulary` tool keys into it via `f"{scout}_scout"` so e.g. the
+    Cinderella scout (whose `name` is "cinderella") draws from the JSON
+    bucket "cinderella_scout". Optional — None means `pull_vocabulary`
+    returns "" and the agent falls back to free-text generation.
     """
     return [
         _make_wire_emit(wire=wire, scout=scout),
@@ -72,6 +82,10 @@ def build_scout_tools(
         _make_write_lead_report(
             firestore=firestore,
             hnd=hnd,
+            scout=scout,
+        ),
+        _make_pull_vocabulary(
+            vocabulary=wire_vocabulary,
             scout=scout,
         ),
     ]
@@ -393,3 +407,42 @@ def _make_write_lead_report(*, firestore: Any | None, hnd: Any | None, scout: Su
         return report_id
 
     return write_lead_report
+
+
+def _make_pull_vocabulary(*, vocabulary: Any | None, scout: SubAgentId):
+    # The JSON's per-agent buckets use the `_scout` suffix
+    # (`cinderella_scout`, `comeback_scout`, ...) while the LlmAgent's
+    # `name` is the bare scout id (`cinderella`, ...). Bind the JSON-side
+    # key here so the LLM-facing tool stays simple.
+    agent_name = f"{scout}_scout"
+
+    async def pull_vocabulary(message_type: str = "thinking", **slots: Any) -> str:
+        """Pull a curated voice-fragment from the Wire Vocabulary library.
+
+        Use for in-progress 'thinking' events to maintain consistent Wire
+        voice texture (BUILD_SPEC §6.3 + §6.4). The fragment may have
+        `[snake_case]` slots — pass them as kwargs.
+
+        Args:
+            message_type: 'thinking' | 'milestone' | 'intervention' | 'decision'
+            **slots: kwargs filled into [snake_case] placeholders
+                (e.g., place="Mt. Pleasant").
+
+        Returns:
+            A filled fragment string. Use it directly as the message in
+            your next wire_emit call. If the fragment library is empty for
+            this agent + message_type, returns an empty string and you
+            should fall back to free-text generation.
+
+        Voice texture: BUILD_SPEC §6.3 wants ~70% thinking + ~30%
+        milestone. Lean on this tool for thinking events; you may
+        freelance milestones.
+        """
+        if vocabulary is None:
+            return ""
+        fragment = vocabulary.sample(agent_name, message_type)
+        if fragment is None:
+            return ""
+        return vocabulary.fill(fragment, **slots)
+
+    return pull_vocabulary

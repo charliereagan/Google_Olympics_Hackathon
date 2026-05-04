@@ -68,6 +68,7 @@ class ScoutDesk:
         hnd: HndDetector | None = None,
         scout_model: str = "gemini-3-flash-preview",
         cost_counter: Any | None = None,
+        wire_vocabulary: Any | None = None,
     ) -> None:
         self._wire = wire
         self._bigquery = bigquery
@@ -75,11 +76,12 @@ class ScoutDesk:
         self._hnd = hnd
         self._cost_counter = cost_counter
         self._model = scout_model
+        self._wire_vocabulary = wire_vocabulary
 
-        # Construct sub-scout LlmAgents with bound tools. The four standard
+        # Construct sub-scout LlmAgents with bound tools. The five standard
         # scout tools (wire_emit, query_candidates, grounded_search,
-        # write_lead_report) are built inside each `build_*_scout` from the
-        # runtime deps passed here.
+        # write_lead_report, pull_vocabulary) are built inside each
+        # `build_*_scout` from the runtime deps passed here.
         common = dict(
             model=scout_model,
             wire=wire,
@@ -87,6 +89,7 @@ class ScoutDesk:
             firestore=firestore,
             hnd=hnd,
             cost_counter=cost_counter,
+            wire_vocabulary=wire_vocabulary,
         )
         self._cinderella = build_cinderella_scout(prompt=prompts["cinderella_scout"], **common)
         self._comeback = build_comeback_scout(prompt=prompts["comeback_scout"], **common)

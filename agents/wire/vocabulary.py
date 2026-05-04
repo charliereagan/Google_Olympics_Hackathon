@@ -29,10 +29,16 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_PATH = REPO_ROOT / "data" / "wire_vocabulary.json"
 
-# Match {snake_case_or_int} placeholders. Underscores + ASCII letters + digits
-# only; spaces or punctuation inside braces don't count (those would be format
-# spec or escapes).
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# Match `{snake_case_or_int}` and `[snake_case_or_int]` placeholders.
+# Underscores + ASCII letters + digits only inside the brackets; spaces or
+# punctuation don't count (those would be format spec or escapes).
+#
+# HOE-DEC-032 settled the canonical placeholder convention as `[snake_case]`,
+# but the seed JSON shipped with `{snake_case}` slots and is treated as data
+# (do not edit it as code). To keep both the JSON's existing slots and the
+# canonical bracket style working, fill() substitutes against either bracket
+# style — `{place}` and `[place]` both match.
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}|\[([A-Za-z_][A-Za-z0-9_]*)\]")
 
 
 class WireVocabulary:
@@ -99,22 +105,33 @@ class WireVocabulary:
         return random.choice(bucket)
 
     def fill(self, fragment: str, **slots: object) -> str:
-        """Fill `{placeholder}` slots in `fragment`. Missing slots stay as-is.
+        """Fill `{placeholder}` and `[placeholder]` slots. Missing slots stay as-is.
+
+        Both bracket styles are supported (HOE-DEC-032): `[snake_case]` is the
+        canonical style going forward, while `{snake_case}` is preserved for
+        backward-compatibility with the seed JSON.
 
         Example::
 
             v.fill("Going with {place}.", place="Mount Pleasant")
             # -> "Going with Mount Pleasant."
 
+            v.fill("Going with [place].", place="Mount Pleasant")
+            # -> "Going with Mount Pleasant."
+
             v.fill("{a} {b}", a="x")
             # -> "x {b}"   (unknown {b} preserved, not raised)
+
+            v.fill("[a] {b}", a="x", b="y")
+            # -> "x y"     (mixed bracket styles both work)
         """
 
         def _sub(match: re.Match[str]) -> str:
-            key = match.group(1)
+            # group(1) = curly-brace key (or None); group(2) = square-bracket key (or None).
+            key = match.group(1) if match.group(1) is not None else match.group(2)
             if key in slots:
                 return str(slots[key])
-            return match.group(0)  # leave the literal `{key}` in place
+            return match.group(0)  # leave the literal `{key}` or `[key]` in place
 
         return _PLACEHOLDER_RE.sub(_sub, fragment)
 
