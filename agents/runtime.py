@@ -74,6 +74,7 @@ class RuntimeState:
     editor: Any = None
     scout_desk: Any = None
     investigator: Any = None
+    narrator: Any = None
     nil_layer: Any = None
     wire_emitter: Any = None
     pacer_factory: Callable[[float], Any] | None = None
@@ -350,7 +351,6 @@ def _build_placeholder_agents(prompts: dict[str, str], model_id: str) -> dict[st
     names = [
         "equity_editor",
         "storyteller",
-        "narrator",
         "publish_gate",
     ]
     agents: dict[str, Any] = {}
@@ -481,6 +481,22 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         cost_counter=cost_counter,
         wire_vocabulary=wire_vocabulary,
     )
+    # Narrator (Day-5): deterministic Gemini Flash TTS synthesis. Not an LLM
+    # Runner — `narrate(draft)` calls the TTS endpoint directly per
+    # BUILD_SPEC §5.6. Voices pinned via HOE-DEC-025 (Algenib / Fenrir).
+    from agents.narrator.agent import NarratorAgent
+    from agents.narrator.tts_client import GeminiFlashTTSClient
+    tts_client = GeminiFlashTTSClient(
+        project=env["project"], location=env["location"]
+    )
+    narrator = NarratorAgent(
+        wire=wire_emitter,
+        firestore=fs_client,
+        storage=storage_client,
+        tts_client=tts_client,
+        cost_counter=cost_counter,
+        bucket_name="storytellers-room-audio",
+    )
     # NOTE: editor.runtime_state is set AFTER RuntimeState construction
     # below, but EditorAgent already stores the ref so the assignment lands.
     editor = EditorAgent(
@@ -512,6 +528,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         editor=editor,
         scout_desk=scout_desk,
         investigator=investigator,
+        narrator=narrator,
         nil_layer=nil_layer,
         wire_emitter=wire_emitter,
         cost_counter=cost_counter,
@@ -530,6 +547,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
     # RuntimeState — done after construction to break the chicken-and-egg.
     editor._runtime_state = _state  # type: ignore[attr-defined]
     investigator._runtime_state = _state  # type: ignore[attr-defined]
+    narrator._runtime_state = _state  # type: ignore[attr-defined]
     logger.info("agent-runtime: boot complete")
 
     try:
@@ -828,6 +846,11 @@ def _build_app():
         if s.investigator is not None:
             agents["investigator"] = {
                 "name": getattr(s.investigator, "name", "investigator"),
+                "status": "idle",
+            }
+        if s.narrator is not None:
+            agents["narrator"] = {
+                "name": getattr(s.narrator, "name", "narrator"),
                 "status": "idle",
             }
         for name, a in s.placeholder_agents.items():

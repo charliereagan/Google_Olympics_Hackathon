@@ -93,7 +93,7 @@ def build_investigator_tools(
             model=deep_research_model,
             timeout_s=deep_research_timeout_s,
         ),
-        _make_write_investigation_packet(firestore=firestore),
+        _make_write_investigation_packet(firestore=firestore, wire=wire),
     ]
 
 
@@ -641,7 +641,7 @@ async def _safe_emit_thinking(wire: Any, message: str) -> None:
 # --- write_investigation_packet -----------------------------------------------
 
 
-def _make_write_investigation_packet(*, firestore: Any | None):
+def _make_write_investigation_packet(*, firestore: Any | None, wire: Any | None = None):
     async def write_investigation_packet(
         story_unit_id: str,
         story_unit_title: str,
@@ -701,6 +701,10 @@ def _make_write_investigation_packet(*, firestore: Any | None):
             "updated_at": now,
         }
         if firestore is not None and hasattr(firestore, "collection"):
+            logger.info(
+                "write_investigation_packet: persisting packet_id=%s story_unit_id=%s",
+                packet_id, story_unit_id,
+            )
             try:
                 coll = firestore.collection("investigation_packets")
                 res = coll.add(doc)
@@ -711,13 +715,40 @@ def _make_write_investigation_packet(*, firestore: Any | None):
                 # doc body so reads are stable.
                 if isinstance(res, tuple) and len(res) >= 2:
                     doc_ref = res[1]
-                    return getattr(doc_ref, "id", packet_id)
+                    fs_id = getattr(doc_ref, "id", packet_id)
+                    logger.info(
+                        "write_investigation_packet: persisted packet_id=%s firestore_id=%s",
+                        packet_id, fs_id,
+                    )
+                    return fs_id
                 if hasattr(res, "id"):
-                    return str(res.id)
+                    fs_id = str(res.id)
+                    logger.info(
+                        "write_investigation_packet: persisted packet_id=%s firestore_id=%s",
+                        packet_id, fs_id,
+                    )
+                    return fs_id
+                logger.info(
+                    "write_investigation_packet: persisted packet_id=%s (client returned no doc_ref)",
+                    packet_id,
+                )
             except Exception:
+                # BUILD_SPEC §17.1: fail visibly on the Wire. The model's
+                # return-value contract is preserved (we still return
+                # packet_id), but the operator now sees the failure as
+                # Wire texture instead of a silent ghost write.
                 logger.exception(
                     "write_investigation_packet: firestore write failed"
                 )
+                await _safe_emit_thinking(
+                    wire,
+                    "*hold — investigation packet write failed; the room will retry on the next dispatch*",
+                )
+        else:
+            logger.warning(
+                "write_investigation_packet: no firestore client; packet_id=%s not persisted",
+                packet_id,
+            )
         return packet_id
 
     return write_investigation_packet

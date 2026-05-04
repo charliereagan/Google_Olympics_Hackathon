@@ -282,6 +282,55 @@ async def test_write_investigation_packet_persists_to_firestore():
 
 
 @pytest.mark.asyncio
+async def test_write_investigation_packet_emits_wire_thinking_on_firestore_failure():
+    """When the Firestore write raises, the tool MUST emit a Wire `thinking`
+    event so the operator sees the failure (BUILD_SPEC §17.1 — "fail visibly
+    on the Wire"). The function still returns a packet_id to preserve the
+    LLM-facing return contract; the failure visibility is the new bit.
+    """
+
+    class _RaisingColl:
+        def __init__(self) -> None:
+            self.added: list[dict] = []
+
+        def stream(self):
+            return iter([])
+
+        def add(self, doc):  # noqa: D401
+            raise RuntimeError("simulated firestore unavailable")
+
+    class _RaisingFirestore:
+        def collection(self, name: str):
+            return _RaisingColl()
+
+    wire = _FakeWire()
+    tools = _build_tools(wire=wire, firestore=_RaisingFirestore())
+    packet_id = await tools["write_investigation_packet"](
+        story_unit_id="us-ia-mt-pleasant",
+        story_unit_title="Mt. Pleasant, Iowa",
+        story_unit_type="place",
+        narrative_spine="The town's first Olympian came in 1964.",
+        geography={"state": "IA", "region": "Midwest", "population": 8500, "notes": ""},
+        historical_context={"era_parallel": "1960s Athletics era", "pattern_notes": ""},
+        trend_signals={"olympic_count_history": [], "paralympic_count_history": []},
+        sources=[],
+        paralympic_depth_score=0.0,
+        ready_for_storyteller=False,
+    )
+    # Return contract preserved (model thinks it succeeded — that's the
+    # contract; the operator sees the failure on the Wire).
+    assert isinstance(packet_id, str) and len(packet_id) > 0
+    # Wire failure event emitted.
+    failure_events = [
+        e for e in wire.emitted
+        if "investigation packet write failed" in e.get("message", "")
+    ]
+    assert len(failure_events) == 1
+    assert failure_events[0]["agent"] == "investigator"
+    assert failure_events[0]["message_type"] == "thinking"
+
+
+@pytest.mark.asyncio
 async def test_read_lead_report_raises_on_missing_doc():
     """read_lead_report raises LeadReportNotFoundError when nothing matches."""
     firestore = _FakeFirestore(lead_reports=[

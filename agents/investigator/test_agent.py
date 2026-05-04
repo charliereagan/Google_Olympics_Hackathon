@@ -328,3 +328,46 @@ async def test_investigate_records_cost_and_stamp_on_success():
     assert inc_kwargs["axis"] == "gemini_pro"
     assert inc_kwargs["input_tokens"] == 1200
     assert inc_kwargs["output_tokens"] == 80
+
+
+@pytest.mark.asyncio
+async def test_pull_vocabulary_tool_uses_investigator_key():
+    """The Investigator's pull_vocabulary tool keys into the 'investigator'
+    bucket of the wire_vocabulary, not 'investigator_scout' or anything else.
+
+    BUILD_SPEC §6.4 — vocabulary buckets are keyed by the agent's bare name
+    (the JSON key). The Investigator must NOT pass `investigator_scout` or
+    `investigator_agent` or any decorated form.
+    """
+    fake_vocab = mock.MagicMock()
+    fake_vocab.sample = mock.MagicMock(return_value="pulling sources. [outlet] has hometown coverage.")
+    fake_vocab.fill = mock.MagicMock(
+        return_value="pulling sources. Quad-City Times has hometown coverage."
+    )
+
+    investigator = InvestigatorAgent(
+        prompt="You are the Investigator (test).",
+        wire=_FakeWire(),
+        firestore=_FakeFirestore(),
+        bigquery=None,
+        model_id="gemini-3.1-pro-preview",
+        wire_vocabulary=fake_vocab,
+    )
+    pull_vocabulary = next(
+        t for t in investigator._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "pull_vocabulary"
+    )
+
+    out = await pull_vocabulary(message_type="thinking", outlet="Quad-City Times")
+
+    assert out == "pulling sources. Quad-City Times has hometown coverage."
+    fake_vocab.sample.assert_called_once()
+    args, _kwargs = fake_vocab.sample.call_args
+    assert args[0] == "investigator", (
+        f"expected sample() called with 'investigator' as agent_name; got {args!r}"
+    )
+    # Sanity: assert what it ISN'T (the foot-gun this test guards against).
+    assert args[0] != "investigator_scout"
+    fake_vocab.fill.assert_called_once_with(
+        "pulling sources. [outlet] has hometown coverage.", outlet="Quad-City Times"
+    )
