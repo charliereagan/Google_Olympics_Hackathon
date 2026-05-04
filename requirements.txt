@@ -1,0 +1,38 @@
+# Agent-runtime production dependencies (Day 2 skeleton).
+#
+# Distinct from `scripts/requirements.txt` (which is operational tooling
+# only — google-auth + requests for verify_models.py / list_tts_voices.py).
+# This file is what the Cloud Run agent-runtime container installs.
+#
+# Pin floors are conservative; pip's resolver picks the latest minor that
+# satisfies all of them. Bump deliberately on each Day-2 → Day-7 milestone.
+
+# Web framework + ASGI server (HOE-DEC-026)
+fastapi>=0.115.0,<1.0
+uvicorn[standard]>=0.30.0,<1.0
+
+# Pydantic — used by ADK FunctionTool args_schema; v2 API.
+pydantic>=2.7,<3.0
+
+# Google ADK Python (2.0 Beta — see plan §C open question 2 for vertexai init)
+google-adk>=2.0.0b0
+
+# Vertex AI SDK + AI Platform
+google-cloud-aiplatform>=1.60.0
+
+# Google Cloud clients
+google-cloud-firestore>=2.16.0
+google-cloud-bigquery>=3.21.0
+google-cloud-storage>=2.16.0
+google-cloud-logging>=3.10.0
+
+# OpenTelemetry → Cloud Trace
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-gcp-trace>=1.7.0
+
+# Aho-Corasick for the NIL Redaction Layer (HOE-DEC-027 primary).
+# Fallback to pyahocorasick is handled in code; only add the fallback dep
+# here if the rs wheel is missing on the Cloud Run base image and that fact
+# is documented in tech_snapshot.md.
+ahocorasick_rs>=0.20.0

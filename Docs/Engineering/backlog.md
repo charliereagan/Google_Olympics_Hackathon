@@ -31,6 +31,13 @@ When the build spec is fully delivered, archive it to `Docs/Engineering/archive/
 - [defer 2026-05-03] **`era_or_decade` is birth-decade, not competition-decade** in the registry. BUILD_SPEC §5.7's near-id heuristic (sport + hometown + event + year) implies birth-decade is acceptable, but if the Day-6/7 Layer wants competition-decade for tighter near-id checks, change `merge._from_olympedia` to use `min(games_years)` instead of `birth_year`. Tracked.
 - [defer 2026-05-03] **Birth year missing for ~25% of Olympedia records** triggers loose-match dedup (first, last) without year. May cause minor over-merging of distinct same-named athletes, which is preferable to under-coverage. Backlog item: revisit if Day-9 spot-checks find specific over-merge cases.
 
+### Day-3 work surfaced from Day-2 skeleton smoke test (2026-05-04)
+
+- [defer 2026-05-04] **HND detector async on_snapshot gap.** `firestore_v1.AsyncCollectionReference.on_snapshot` raises `NotImplementedError` in the current SDK. The detector falls back to stub mode at boot (logged). Day-3 fix per plan §G.2: run a sync `firestore_v1.Client.collection('lead_reports').on_snapshot(callback)` watcher on a separate thread and marshal callbacks back to the asyncio loop via `asyncio.run_coroutine_threadsafe`. Unit tests drive `record_lead_report` directly, so the detection logic is correctness-complete; just the production listener path needs wiring.
+- [defer 2026-05-04] **`/health/nil` FastAPI signature** — initial worker code used `async def health_nil(response: Response)` to mutate status code; FastAPI 0.136 interprets that as a query parameter and returns 422. Fixed to use `JSONResponse(status_code=503, content=...)` directly. Lesson: prefer JSONResponse over Response-mutation for non-200 health endpoints. Already fixed; logged here so future workers don't hit the same trap.
+- [defer 2026-05-04] **`google-adk` UserWarning at boot:** `[EXPERIMENTAL] feature FeatureName.PLUGGABLE_AUTH is enabled.` Cosmetic; suppress in production logging config or pin to a stable ADK version once 2.0 GA lands.
+- [defer 2026-05-04] **`authlib` deprecation warning:** `authlib.jose module is deprecated, please use joserfc instead.` From an `authlib` transitive dep of `google-adk`. Cosmetic. Will resolve when ADK pulls in `joserfc` directly.
+
 ### Day-2 implementation handoff prep (2026-05-03)
 
 - [defer 2026-05-03] **Agent-runtime skeleton plan ready at `Docs/Engineering/plans/agent-runtime-skeleton-v1.md`.** When ready, spawn an implementation worker with that plan as the binding spec. Worker writes files in the topo-sorted order from §H. HoE reviews + tests + commits. Each step independently testable with `pytest -x`.

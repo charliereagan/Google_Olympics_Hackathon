@@ -1,6 +1,6 @@
 # tech_snapshot.md — Ground truth for the runtime environment
 
-**Last refreshed:** 2026-05-03 by HoE Session 2 (Day 1 provisioning + ops scripts + voice audition + athlete-registry seed + agent-runtime skeleton plan complete)
+**Last refreshed:** 2026-05-04 by HoE Session 2 (Day-2 agent-runtime skeleton landed; full lifespan boot verified against live Vertex AI + BigQuery; 64 unit tests + 1 skipped; all three health endpoints green)
 
 This file is the **runtime ground truth**: what's actually provisioned, what model IDs respond, what voices exist, what env vars are set. Refresh this on **every infra change**. Distinct from:
 - `BUILD_SPEC.md` = the plan (architecture, rules, schemas)
@@ -166,7 +166,10 @@ Output is watermarked with **SynthID** automatically.
 | BigQuery tables (×7 each, 14 total) | ✓ `candidates`, `athlete_registry`, `historical_athletes`, `geography`, `championships`, `agent_call_counters`, `agent_errors` | Schemas in `data/bq_schemas/*.json` (committed). **`athlete_registry` seeded 2026-05-03: 11,188 rows in production (`storytellers_room`), 11,188 rows in dev (`storytellers_room_dev`).** Source: KeithGalli/Olympics-Dataset (Olympedia public CSVs filtered NOC=USA) + Wikidata SPARQL (12 Olympic + 19 Paralympic medalist cross-reference). Loader at `data/load_athlete_registry/`. |
 | Cloud Storage buckets | ✓ `gs://storytellers-room-hero-images`, `gs://storytellers-room-audio`, `gs://storytellers-room-fallback-heroes` (US multi-region, uniform bucket-level access) | Created 2026-05-03; all empty |
 | Artifact Registry | ✓ `storytellers-room` (Docker, `us-central1`) | Created 2026-05-03 for Cloud Run image storage |
-| Cloud Run | **Empty** — no services yet | Pending: deploy `agent-runtime` + `web` |
+| Cloud Run | **Empty** — no services yet | Pending: deploy `agent-runtime` + `web`. The runtime is locally-runnable as of 2026-05-04 — `uvicorn agents.runtime:app` boots cleanly against live Vertex AI + BigQuery with all 7 cast members constructed and `/health/nil` returning `registry_size: 11188`. |
+| Agent runtime locally verified | ✓ uvicorn boots; `/health/heartbeat` 200; `/health/nil` 200 with registry_size 11188; `/health/agents` lists all 7 + 11 streaming profiles | 2026-05-04 |
+| Aho-Corasick backend in production | `ahocorasick_rs 1.0.3` (HOE-DEC-027 primary) — wheels installed cleanly; `pyahocorasick` fallback NOT needed | 2026-05-04 verification |
+| Async on_snapshot known gap | `firestore_v1.AsyncCollectionReference.on_snapshot` raises `NotImplementedError`; HND detector falls back to stub mode (logged) | Day-3 fix per plan §G open question 2 — sync watcher on a thread + `asyncio.run_coroutine_threadsafe` |
 | Service accounts | ✓ `agent-runtime@predictive-fx-495200-j4.iam.gserviceaccount.com`, ✓ `web-frontend@predictive-fx-495200-j4.iam.gserviceaccount.com` | Note: `web-frontend` not `web` (6-char minimum SA ID); docs updated to match. IAM bindings applied (see §6.1). |
 | Secret Manager | **Empty** | Add only when an external API key is needed (e.g., music vendor) |
 | Budget alerts | ✓ `$100 informational`, `$200 audit`, `$300 kill-switch` (each with 50%, 90%, 100%, 100%-forecasted thresholds) | Created 2026-05-03 |
