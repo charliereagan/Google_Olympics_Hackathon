@@ -1,6 +1,6 @@
 # tech_snapshot.md — Ground truth for the runtime environment
 
-**Last refreshed:** 2026-05-04 by HoE Session 2 (Day-2 agent-runtime skeleton landed; full lifespan boot verified against live Vertex AI + BigQuery; 64 unit tests + 1 skipped; all three health endpoints green; BUILD_SPEC §6.10 compression-formula contradiction corrected per HOE-DEC-029)
+**Last refreshed:** 2026-05-04 by HoE Session 2 (Day-3 Editor `think_once` body + `/api/investigate` endpoint shipped; real ADK Runner integration against live Vertex AI; HOE-DEC-030 + HOE-DEC-031 ratified; 83 unit tests + 1 skipped)
 
 This file is the **runtime ground truth**: what's actually provisioned, what model IDs respond, what voices exist, what env vars are set. Refresh this on **every infra change**. Distinct from:
 - `BUILD_SPEC.md` = the plan (architecture, rules, schemas)
@@ -78,7 +78,11 @@ All models reached on `location='global'`. Probe pattern: `POST https://aiplatfo
 ### 3.1 SDK initialization
 
 ```python
-import vertexai
+import os, vertexai
+# REQUIRED: tells google-genai (which ADK uses internally) to route via Vertex AI
+# instead of the Gemini Developer API key path. HOE-DEC-030. Without this,
+# ADK Runner calls fail with "No API key was provided." even after vertexai.init.
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
 vertexai.init(project="predictive-fx-495200-j4", location="global")
 ```
 
@@ -87,6 +91,7 @@ vertexai.init(project="predictive-fx-495200-j4", location="global")
 export GOOGLE_CLOUD_PROJECT=predictive-fx-495200-j4
 export GOOGLE_CLOUD_LOCATION=global
 export VERTEX_AI_LOCATION=global
+export GOOGLE_GENAI_USE_VERTEXAI=true   # HOE-DEC-030 (REQUIRED for ADK + Vertex AI)
 ```
 
 ## 4. Gemini 3.1 Flash TTS — voice catalog + pinned picks
@@ -169,7 +174,10 @@ Output is watermarked with **SynthID** automatically.
 | Cloud Run | **Empty** — no services yet | Pending: deploy `agent-runtime` + `web`. The runtime is locally-runnable as of 2026-05-04 — `uvicorn agents.runtime:app` boots cleanly against live Vertex AI + BigQuery with all 7 cast members constructed and `/health/nil` returning `registry_size: 11188`. |
 | Agent runtime locally verified | ✓ uvicorn boots; `/health/heartbeat` 200; `/health/nil` 200 with registry_size 11188; `/health/agents` lists all 7 + 11 streaming profiles | 2026-05-04 |
 | Aho-Corasick backend in production | `ahocorasick_rs 1.0.3` (HOE-DEC-027 primary) — wheels installed cleanly; `pyahocorasick` fallback NOT needed | 2026-05-04 verification |
-| Async on_snapshot known gap | `firestore_v1.AsyncCollectionReference.on_snapshot` raises `NotImplementedError`; HND detector falls back to stub mode (logged) | Day-3 fix per plan §G open question 2 — sync watcher on a thread + `asyncio.run_coroutine_threadsafe` |
+| Async on_snapshot known gap | `firestore_v1.AsyncCollectionReference.on_snapshot` raises `NotImplementedError`; HND detector falls back to stub mode (logged) | Day-3/4 fix per plan §G open question 2 — sync watcher on a thread + `asyncio.run_coroutine_threadsafe`. Still pending. |
+| Firestore composite index | `wire_events: (mode ASC, timestamp DESC)` — created 2026-05-04 via gcloud. Required by Editor's `_read_recent_published` query. State: CREATING at last check (5-15 min typical). | Editor's exception handler returns empty list while index builds (non-fatal). Verify state with `gcloud firestore indexes composite list --project=predictive-fx-495200-j4`. |
+| Editor `think_once` end-to-end verified | ✓ Live ADK Runner against `gemini-3.1-pro-preview` on `vertexai.init(location='global')` + `GOOGLE_GENAI_USE_VERTEXAI=true`; `last_think_cycle` populated; tool calls auto-executed by Runner | 2026-05-04 |
+| `POST /api/investigate` end-to-end verified | ✓ HTTP 202 with `investigation_id` on accept; 422 on validation errors (prompt length, compression bounds); 429 on rate limit (3/hr/IP); 202 with `{status: queued}` when another investigation is in flight | 2026-05-04 |
 | Service accounts | ✓ `agent-runtime@predictive-fx-495200-j4.iam.gserviceaccount.com`, ✓ `web-frontend@predictive-fx-495200-j4.iam.gserviceaccount.com` | Note: `web-frontend` not `web` (6-char minimum SA ID); docs updated to match. IAM bindings applied (see §6.1). |
 | Secret Manager | **Empty** | Add only when an external API key is needed (e.g., music vendor) |
 | Budget alerts | ✓ `$100 informational`, `$200 audit`, `$300 kill-switch` (each with 50%, 90%, 100%, 100%-forecasted thresholds) | Created 2026-05-03 |

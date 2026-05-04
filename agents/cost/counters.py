@@ -133,6 +133,44 @@ class CostCounter:
         c.grounded_queries += grounded_queries
         self._dirty.add(key)
 
+    def snapshot_today(
+        self,
+        *,
+        axis: CostAxis | None = None,
+        agent: AgentId | None = None,
+    ) -> dict[str, int]:
+        """Return today's totals as a flat dict for inclusion in agent context.
+
+        If `axis` is provided, returns just that axis (e.g. `{'gemini_pro': 12345}`);
+        otherwise returns a per-axis breakdown across all axes touched today.
+        Filtered by `agent` when provided. The Editor's `think_once` calls this
+        to feed today's burn into its context window — used for the
+        ``## Cost dashboard`` section of the user message.
+
+        Synchronous (in-memory only). The BigQuery flush is independent.
+        """
+        today = self._clock().date()
+        out: dict[str, int] = {}
+        for key, c in self._state.items():
+            k_date, k_agent, _k_sub, k_axis, _k_model = key
+            if k_date != today:
+                continue
+            if axis is not None and k_axis != axis:
+                continue
+            if agent is not None and k_agent != agent:
+                continue
+            # Pick the right field per axis (mirrors assert_under_ceiling).
+            if k_axis == "tts":
+                value = c.audio_chars
+            elif k_axis == "grounding":
+                value = c.grounded_queries
+            elif k_axis == "gemini_pro":
+                value = c.input_tokens + c.output_tokens
+            else:
+                value = c.calls
+            out[k_axis] = out.get(k_axis, 0) + value
+        return out
+
     async def assert_under_ceiling(
         self,
         *,

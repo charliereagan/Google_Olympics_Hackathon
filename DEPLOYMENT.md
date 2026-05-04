@@ -130,7 +130,7 @@ gcloud run deploy agent-runtime \
   --use-http2 \
   --timeout=3600s \
   --port=8080 \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=predictive-fx-495200-j4,GOOGLE_CLOUD_LOCATION=global,VERTEX_AI_LOCATION=global,FIRESTORE_DATABASE=(default),APP_ENV=production" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=predictive-fx-495200-j4,GOOGLE_CLOUD_LOCATION=global,VERTEX_AI_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=true,FIRESTORE_DATABASE=(default),APP_ENV=production" \
   --set-secrets="..." \
   --no-allow-unauthenticated \
   --project=predictive-fx-495200-j4

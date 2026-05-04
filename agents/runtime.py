@@ -19,6 +19,11 @@ Health endpoints:
   GET /health/nil       — 503 if registry not loaded, 200 otherwise.
   GET /health/agents    — per-agent {idle|thinking|error, last_wire_emit_ts}.
 
+API endpoints:
+  POST /api/investigate — live URL hero CTA submission (BUILD_SPEC §11.1).
+                          Per-IP rate-limited (3/hr). One concurrent live
+                          investigation at a time (BUILD_SPEC §6.10).
+
 SIGTERM: drain the autonomous task, persist a Firestore checkpoint, close.
 """
 
@@ -29,11 +34,22 @@ import json
 import logging
 import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+# Module-level FastAPI imports so type annotations on route handlers (e.g.
+# `request: Request`) resolve via the module's __globals__ — required because
+# `from __future__ import annotations` makes annotations strings, and FastAPI's
+# get_type_hints() resolves them using __globals__, not the local scope of
+# _build_app(). Guarded for environments without FastAPI installed.
+try:
+    from fastapi import Request as _FastAPIRequest  # type: ignore[import-untyped]
+except ImportError:  # pragma: no cover
+    _FastAPIRequest = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +81,11 @@ class RuntimeState:
     stop_event: asyncio.Event | None = None
     nil_refresh_task: asyncio.Task | None = None
     last_think_cycle: datetime | None = None
+    # Per-IP submission timestamps (sliding 1h window, BUILD_SPEC §11.1).
+    cta_rate_limit: dict[str, list[float]] = field(default_factory=dict)
+    # Active live-investigation task; only one at a time (BUILD_SPEC §6.10).
+    active_live_investigation: asyncio.Task | None = None
+    active_live_investigation_id: str | None = None
 
 
 # ----- Config validation ------------------------------------------------------
@@ -102,12 +123,28 @@ def _validate_env() -> dict[str, str]:
 
 
 def _init_vertex_ai(project: str, location: str) -> None:
-    """vertexai.init(project, location='global'). Must run before any LlmAgent."""
+    """vertexai.init(project, location='global'). Must run before any LlmAgent.
+
+    Also sets `GOOGLE_GENAI_USE_VERTEXAI=true` + `GOOGLE_CLOUD_PROJECT` +
+    `GOOGLE_CLOUD_LOCATION` so the `google-genai` SDK (which ADK uses
+    internally) routes Gemini calls through Vertex AI / ADC instead of
+    defaulting to the Gemini Developer API (which requires an API key).
+    Caught empirically during Day-3 smoke test — without these env vars,
+    ADK's Runner raises `ValueError: No API key was provided.`
+    """
+    # Force ADK / google-genai to use Vertex AI auth (ADC) not API-key auth.
+    os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+    os.environ["GOOGLE_CLOUD_PROJECT"] = project
+    os.environ["GOOGLE_CLOUD_LOCATION"] = location
+
     try:
         import vertexai  # type: ignore[import-untyped]
 
         vertexai.init(project=project, location=location)
-        logger.info("vertexai.init OK (project=%s location=%s)", project, location)
+        logger.info(
+            "vertexai.init OK (project=%s location=%s); GOOGLE_GENAI_USE_VERTEXAI=true",
+            project, location,
+        )
     except ImportError:
         logger.warning("vertexai not installed; skipping init (Day-2 dev mode)")
     except Exception:
@@ -297,12 +334,15 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         hnd=hnd,
         scout_model=env["model_scouts"],
     )
+    # NOTE: editor.runtime_state is set AFTER RuntimeState construction
+    # below, but EditorAgent already stores the ref so the assignment lands.
     editor = EditorAgent(
         prompt=prompts["editor"],
         wire=wire_emitter,
         scout_desk=scout_desk,
         firestore=fs_client,
         model_id=env["model_editor"],
+        cost_counter=cost_counter,
     )
     placeholder_agents = _build_placeholder_agents(prompts, env["model_editor"])
 
@@ -335,6 +375,9 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         placeholder_agents=placeholder_agents,
         stop_event=stop_event,
     )
+    # Backref so editor.think_once() can stamp last_think_cycle on
+    # RuntimeState — done after construction to break the chicken-and-egg.
+    editor._runtime_state = _state  # type: ignore[attr-defined]
     logger.info("agent-runtime: boot complete")
 
     try:
@@ -360,6 +403,188 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
             except Exception:
                 logger.exception("cost_counter.stop failed")
         logger.info("agent-runtime: shutdown complete")
+
+
+# ----- POST /api/investigate (live URL hero CTA) -----------------------------
+
+
+# BUILD_SPEC §11.1 + §6.10 binding constants.
+_CTA_MAX_PROMPT_CHARS = 500
+_CTA_MIN_COMPRESSION = 0.05
+_CTA_MAX_COMPRESSION = 1.0
+_CTA_RATE_LIMIT_HITS = 3
+_CTA_RATE_LIMIT_WINDOW_S = 60.0 * 60.0  # 1 hour
+
+
+def _client_ip(request: Any) -> str:
+    """Best-effort client-IP extraction. Cloud Run sets X-Forwarded-For."""
+    xff = request.headers.get("x-forwarded-for") if hasattr(request, "headers") else None
+    if xff:
+        # Leftmost IP is the original client (per RFC 7239 conventions).
+        return xff.split(",")[0].strip()
+    client = getattr(request, "client", None)
+    if client is not None and getattr(client, "host", None):
+        return str(client.host)
+    return "unknown"
+
+
+def _check_and_record_rate_limit(
+    state: "RuntimeState",
+    ip: str,
+    *,
+    now: float,
+    limit: int = _CTA_RATE_LIMIT_HITS,
+    window_s: float = _CTA_RATE_LIMIT_WINDOW_S,
+) -> tuple[bool, int]:
+    """Sliding-window per-IP rate-limit. Returns (ok, remaining).
+
+    In-memory map; sufficient given Cloud Run min-instances=1. Day 8+ may
+    move to Firestore if we scale past one instance.
+    """
+    bucket = state.cta_rate_limit.setdefault(ip, [])
+    cutoff = now - window_s
+    # Drop expired entries (in place).
+    bucket[:] = [t for t in bucket if t > cutoff]
+    if len(bucket) >= limit:
+        return (False, 0)
+    bucket.append(now)
+    return (True, max(0, limit - len(bucket)))
+
+
+async def _handle_investigate(request: Any) -> Any:
+    """Body of POST /api/investigate. Module-level so tests can call it."""
+    from fastapi.responses import JSONResponse
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid JSON body"},
+        )
+
+    prompt = body.get("prompt")
+    compression_factor = body.get("compression_factor", 1.0)
+    source = body.get("source", "cta")
+
+    # --- Validation (422 on schema breach) ----------------------------------
+    if not isinstance(prompt, str) or not prompt.strip():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "prompt must be a non-empty string"},
+        )
+    if len(prompt) > _CTA_MAX_PROMPT_CHARS:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": f"prompt exceeds {_CTA_MAX_PROMPT_CHARS} chars (got {len(prompt)})",
+            },
+        )
+    try:
+        cf = float(compression_factor)
+    except (TypeError, ValueError):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "compression_factor must be a number"},
+        )
+    if not (_CTA_MIN_COMPRESSION <= cf <= _CTA_MAX_COMPRESSION):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": (
+                    f"compression_factor must be in [{_CTA_MIN_COMPRESSION},"
+                    f"{_CTA_MAX_COMPRESSION}] (HOE-DEC-029)"
+                ),
+            },
+        )
+
+    try:
+        s = get_state()
+    except RuntimeError:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "runtime not ready"},
+        )
+
+    # --- Rate limit (429) ---------------------------------------------------
+    import time as _time
+
+    ip = _client_ip(request)
+    ok, _remaining = _check_and_record_rate_limit(s, ip, now=_time.time())
+    if not ok:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate limit: 3 submissions per hour per IP",
+            },
+        )
+
+    # --- One concurrent live investigation at a time (BUILD_SPEC §6.10) -----
+    if s.active_live_investigation is not None and not s.active_live_investigation.done():
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "queued",
+                "message": (
+                    "the room is investigating; watching room work in the meantime"
+                ),
+            },
+        )
+
+    if s.editor is None:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "editor not initialized"},
+        )
+
+    # --- Register the new investigation context -----------------------------
+    from agents.wire.types import InvestigationContext as _InvCtx
+
+    investigation_id = f"inv-{uuid.uuid4().hex[:12]}"
+    ctx = _InvCtx(
+        investigation_id=investigation_id,
+        compression_factor=cf,
+        mode="live",
+    )
+
+    # Log every accepted submission (BUILD_SPEC §16.1).
+    try:
+        from agents.observability import log_agent_call as _log
+        _log(
+            agent="editor",
+            sub_agent=None,
+            story_unit_id=None,
+            investigation_id=investigation_id,
+            model=getattr(s.editor, "model", None),
+            tool="api_investigate",
+            latency_ms=0,
+            input_tokens=None,
+            output_tokens=None,
+            compression_factor=cf,
+            outcome="success",
+            wire_event_id=None,
+            error=None,
+        )
+    except Exception:
+        logger.exception("api_investigate: log_agent_call failed")
+
+    async def _run_one_cycle():
+        try:
+            await s.editor.think_once(ctx=ctx)
+        except Exception:
+            logger.exception("api_investigate: editor.think_once raised")
+
+    s.active_live_investigation = asyncio.create_task(_run_one_cycle())
+    s.active_live_investigation_id = investigation_id
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "investigation_id": investigation_id,
+            "compression_factor": cf,
+            "source": source,
+        },
+    )
 
 
 # ----- FastAPI app ------------------------------------------------------------
@@ -415,6 +640,27 @@ def _build_app():
             "loaded_at": s.nil_layer.loaded_at,
             "last_refresh": s.nil_layer.last_refresh_at,
         }
+
+    @app.post("/api/investigate")
+    async def api_investigate(request: _FastAPIRequest):  # type: ignore[valid-type]
+        """Live URL hero CTA submission (BUILD_SPEC §11.1, §6.10).
+
+        Body shape: `{prompt, compression_factor, source}`.
+        - 422 on invalid prompt length or out-of-range compression_factor.
+        - 429 if the per-IP rate limit (3/hour) is exceeded.
+        - 202 with `{status: 'queued'}` if another live investigation is in
+          flight (BUILD_SPEC §6.10 — "the room is investigating; watching
+          room work in the meantime").
+        - 202 with `{investigation_id}` on accept; the Editor's think_once
+          runs as a fire-and-forget asyncio task.
+
+        The `_FastAPIRequest` annotation references the module-level alias
+        because `from __future__ import annotations` makes annotations strings
+        and FastAPI resolves them via `api_investigate.__globals__` — which is
+        the module's globals, not the local scope of `_build_app()`. (Day-3
+        smoke-test bug; fixed.)
+        """
+        return await _handle_investigate(request)
 
     @app.get("/health/agents")
     async def health_agents() -> dict:
