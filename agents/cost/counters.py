@@ -176,23 +176,27 @@ class CostCounter:
         *,
         axis: CostAxis,
         agent: AgentId | None = None,
+        sub_agent: SubAgentId | None = None,
     ) -> None:
         """Raise CostCeilingExceeded if the counter has hit its cap.
 
         Per-axis ceilings are global by default; the `grounding` axis is
-        per-Scout (caller passes `agent=`).
+        per-Scout (caller passes `agent=` and optionally `sub_agent=` for
+        per-sub-scout enforcement).
         """
         if axis not in self._ceilings:
             return
         limit = self._ceilings[axis]
-        # Sum all rows matching axis (and optionally agent) for today.
+        # Sum all rows matching axis (+ optional agent + optional sub_agent) for today.
         today = self._clock().date()
         total = 0
         for key, c in self._state.items():
-            k_date, k_agent, _k_sub, k_axis, _k_model = key
+            k_date, k_agent, k_sub, k_axis, _k_model = key
             if k_date != today or k_axis != axis:
                 continue
             if agent is not None and k_agent != agent:
+                continue
+            if sub_agent is not None and k_sub != sub_agent:
                 continue
             # Pick the right field per axis.
             if axis == "tts":

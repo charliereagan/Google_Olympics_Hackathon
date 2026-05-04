@@ -7,8 +7,14 @@ is ≥0.7. On threshold crossing, emit a single Wire `milestone`:
 priority. Debounce per `story_unit_id`: don't refire within the same window.
 
 The detector subscribes to Firestore `/lead_reports`. In production, that's a
-server-side `on_snapshot` listener. For unit tests, callers push reports via
-`record_lead_report()` directly — same code path, no Firestore needed.
+server-side `on_snapshot` listener. The Firestore async SDK does not implement
+`on_snapshot` (NotImplementedError), so the listener runs against the *sync*
+Firestore client on a Firestore-managed thread; callbacks marshal back to the
+asyncio event loop via `asyncio.run_coroutine_threadsafe`. (Plan §B,
+concurrency model row for HND; §G open question 2.)
+
+For unit tests, callers push reports via `record_lead_report()` directly —
+same code path, no Firestore needed.
 """
 
 from __future__ import annotations
@@ -40,12 +46,19 @@ class HndDetector:
         *,
         firestore: Any,
         wire: Any,
+        firestore_sync: Any | None = None,
         window: timedelta = timedelta(minutes=10),
         threshold: int = 3,
         min_confidence: float = 0.7,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
+        # `firestore` is the async client (used for hnd_fires writes + shared
+        # with WireEmitter / Editor reads). `firestore_sync` is a dedicated
+        # sync client for the on_snapshot listener thread; the async SDK does
+        # not implement on_snapshot. Keeping them separate avoids any
+        # interaction between Firestore's async/sync internals.
         self._firestore = firestore
+        self._firestore_sync = firestore_sync
         self._wire = wire
         self._window = window
         self._threshold = threshold
@@ -54,30 +67,36 @@ class HndDetector:
         self._state: dict[str, _UnitState] = {}
         self._lock = asyncio.Lock()
         self._listener_handle: Any = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    @property
+    def is_listener_attached(self) -> bool:
+        """True if a sync on_snapshot watch handle is active. Test helper."""
+        return self._listener_handle is not None
 
     async def start(self) -> None:
         """Open the Firestore on_snapshot listener.
 
-        In Day-2, if `firestore` doesn't support on_snapshot (test stub),
-        this is a no-op. Tests drive `record_lead_report` directly.
+        If no sync Firestore client was supplied (test stub or local dev
+        without ADC), this is a no-op — tests drive `record_lead_report`
+        directly.
+
+        Otherwise: capture the running event loop, attach a sync watch on
+        `/lead_reports`. Firestore's sync client runs the callback on a
+        Firestore-managed thread; `_on_snapshot_callback` marshals each
+        ADDED change back into the loop.
         """
-        if self._firestore is None or not hasattr(self._firestore, "collection"):
-            logger.info("hnd_detector: no firestore listener (stub mode)")
+        if self._firestore_sync is None:
+            logger.info("hnd_detector: no sync firestore client; running in stub mode")
             return
         try:
-            coll = self._firestore.collection("lead_reports")
-            # The Firestore Admin SDK's sync watch handle: attach on a thread,
-            # marshal callbacks back to the event loop. For Day-2 we punt the
-            # actual subscription wiring to runtime.py; this method just
-            # records the intent.
-            on_snapshot = getattr(coll, "on_snapshot", None)
-            if on_snapshot is None:
-                logger.info("hnd_detector: collection lacks on_snapshot; stub mode")
-                return
-            self._listener_handle = on_snapshot(self._on_snapshot_callback)
-            logger.info("hnd_detector: listener attached")
+            self._loop = asyncio.get_running_loop()
+            coll = self._firestore_sync.collection("lead_reports")
+            self._listener_handle = coll.on_snapshot(self._on_snapshot_callback)
+            logger.info("hnd_detector: sync on_snapshot listener attached")
         except Exception:
             logger.exception("hnd_detector: failed to start listener; running in stub mode")
+            self._listener_handle = None
 
     async def stop(self) -> None:
         if self._listener_handle is not None:
@@ -87,15 +106,33 @@ class HndDetector:
                 logger.exception("hnd_detector: listener unsubscribe failed")
             self._listener_handle = None
 
-    def _on_snapshot_callback(self, doc_snapshots: Any, changes: Any, _read_time: Any) -> None:
-        """Sync callback from Firestore SDK. Marshal to the event loop."""
-        loop = asyncio.get_event_loop()
+    def _on_snapshot_callback(
+        self, doc_snapshots: Any, changes: Any, _read_time: Any
+    ) -> None:
+        """Sync callback from Firestore SDK. Runs on a Firestore-managed
+        thread — must NOT touch the event loop directly. Use
+        `run_coroutine_threadsafe` against the loop captured in `start()`.
+
+        Filter to ADDED changes so MODIFIED/REMOVED don't double-fire
+        `record_lead_report`. Wrap each marshal in try/except so a single
+        bad doc can't kill the listener.
+        """
+        loop = self._loop
+        if loop is None:
+            logger.warning("hnd_detector: callback fired before start(); dropping")
+            return
         for change in changes or []:
             try:
+                change_type = getattr(getattr(change, "type", None), "name", None)
+                if change_type != "ADDED":
+                    continue
                 doc = change.document.to_dict()
+                if not doc:
+                    continue
+                asyncio.run_coroutine_threadsafe(self.record_lead_report(doc), loop)
             except Exception:
-                continue
-            asyncio.run_coroutine_threadsafe(self.record_lead_report(doc), loop)
+                # One bad doc must not kill the watch — log and keep going.
+                logger.exception("hnd_detector: failed to marshal change to loop")
 
     async def record_lead_report(self, report: dict | LeadReport) -> None:
         """Public: feed a Lead Report into the detector.
@@ -151,6 +188,7 @@ class HndDetector:
             "story_unit_id": story_unit_id,
             "mode": "live",
         }
+        wire_event_id: str | None = None
         try:
             wire_event_id = await self._wire.emit(event)
             logger.info(
@@ -159,8 +197,12 @@ class HndDetector:
             )
         except Exception:
             logger.exception("hnd_detector: wire.emit failed for HND fire")
-            return
+            # Don't return — still record the fire to /hnd_fires/ with
+            # wire_event_id=None so we have a paper trail of the threshold
+            # crossing even when the Wire is degraded.
         # Record the fire to /hnd_fires/{id} (best-effort, not blocking).
+        # /hnd_fires/ is NOT a Wire collection — direct .add() is allowed
+        # here (lint excludes hnd_fires).
         try:
             if self._firestore is not None and hasattr(self._firestore, "collection"):
                 self._firestore.collection("hnd_fires").add(
@@ -168,7 +210,7 @@ class HndDetector:
                         "story_unit_id": story_unit_id,
                         "scouts": scouts,
                         "fired_at": now.isoformat(),
-                        "wire_event_id": wire_event_id if "wire_event_id" in dir() else None,
+                        "wire_event_id": wire_event_id,
                     }
                 )
         except Exception:

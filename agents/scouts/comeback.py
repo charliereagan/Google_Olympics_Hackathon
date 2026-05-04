@@ -1,4 +1,4 @@
-"""Comeback Scout — LlmAgent shell. Voice in /prompts/comeback_scout.md."""
+"""Comeback Scout — LlmAgent constructor. Voice in /prompts/comeback_scout.md."""
 
 from __future__ import annotations
 
@@ -11,6 +11,21 @@ def build_comeback_scout(
     *,
     prompt: str,
     model: str = "gemini-3-flash-preview",
+    wire: Any | None = None,
+    bigquery: Any | None = None,
+    firestore: Any | None = None,
+    hnd: Any | None = None,
+    cost_counter: Any | None = None,
     tools: list[Any] | None = None,
 ) -> Any:
-    return _build_scout("comeback", prompt=prompt, model=model, tools=tools)
+    return _build_scout(
+        "comeback",
+        prompt=prompt,
+        model=model,
+        wire=wire,
+        bigquery=bigquery,
+        firestore=firestore,
+        hnd=hnd,
+        cost_counter=cost_counter,
+        tools=tools,
+    )

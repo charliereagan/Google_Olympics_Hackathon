@@ -184,6 +184,67 @@ async def test_think_once_skips_on_cost_ceiling():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_scout_calls_scout_desk():
+    """Editor's bound dispatch_scout tool forwards to scout_desk.dispatch_one
+    with (scout_id, story_unit_id) and returns whatever the desk returned."""
+    scout_desk = mock.Mock()
+    scout_desk.dispatch_one = mock.AsyncMock(
+        return_value={
+            "dispatched": True,
+            "scout": "cinderella",
+            "story_unit_id": "us-ia-mt-pleasant",
+            "lead_report_id": "lead-001",
+            "tool_calls": [],
+            "latency_ms": 1234,
+            "input_tokens": 500,
+            "output_tokens": 100,
+        }
+    )
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=scout_desk,
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+    )
+    # Pull the bound dispatch_scout tool out of _bound_tools.
+    dispatch_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "dispatch_scout"
+    )
+    result = await dispatch_tool("cinderella", "us-ia-mt-pleasant")
+
+    assert result["dispatched"] is True
+    assert result["lead_report_id"] == "lead-001"
+    scout_desk.dispatch_one.assert_awaited_once_with("cinderella", "us-ia-mt-pleasant")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_scout_returns_unknown_scout_error():
+    """Calling dispatch_scout with an unknown scout_id returns an error dict
+    and does NOT invoke scout_desk.dispatch_one."""
+    scout_desk = mock.Mock()
+    scout_desk.dispatch_one = mock.AsyncMock()
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=scout_desk,
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+    )
+    dispatch_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "dispatch_scout"
+    )
+    result = await dispatch_tool("nope", "us-ia-mt-pleasant")
+    assert result["dispatched"] is False
+    assert "error" in result
+    assert "unknown scout_id" in result["error"]
+    scout_desk.dispatch_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_think_once_records_tool_calls_and_tokens():
     """When the Runner returns tool calls + usage metadata, the Editor
     surfaces them in the result and increments the cost counter."""

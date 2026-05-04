@@ -158,22 +158,27 @@ class EditorAgent:
                 story_unit_id: stable id (NEVER an athlete id).
 
             Returns:
-                `{"dispatched": True, "scout": ..., "story_unit_id": ...}`.
+                The Scout Desk's dispatch result:
+                `{dispatched, scout, story_unit_id, lead_report_id?,
+                 tool_calls, latency_ms, input_tokens, output_tokens}`.
             """
             if scout_desk is None:
                 raise RuntimeError("dispatch_scout: no `scout_desk` instance was injected")
+            if scout_id not in {"cinderella", "comeback", "hometown", "echo"}:
+                logger.warning(
+                    "editor.dispatch_scout: unknown scout_id=%r", scout_id
+                )
+                return {
+                    "dispatched": False,
+                    "scout": scout_id,
+                    "story_unit_id": story_unit_id,
+                    "error": f"unknown scout_id: {scout_id}",
+                }
             logger.info(
                 "editor.dispatch_scout: scout=%s story_unit_id=%s",
                 scout_id, story_unit_id,
             )
-            # Day-3: scout_desk.run_pass([story_unit_id], ctx=...) is a Day-4
-            # body. For now we record the dispatch and return; the Scout
-            # bodies arrive in subsequent days.
-            return {
-                "dispatched": True,
-                "scout": scout_id,
-                "story_unit_id": story_unit_id,
-            }
+            return await scout_desk.dispatch_one(scout_id, story_unit_id)
 
         async def accept_equity_recommendation(recommendation_id: str) -> dict:
             """Apply a Paralympic Equity Editor feed-drift recommendation.

@@ -178,6 +178,31 @@ def _build_firestore_client() -> Any:
         return None
 
 
+def _build_firestore_sync_client() -> Any:
+    """Return a Firestore sync client for the HND `on_snapshot` listener.
+
+    The Firestore async SDK does not implement `on_snapshot` (raises
+    `NotImplementedError`); the watch / on_snapshot capability lives only on
+    the sync client. The HND detector runs the sync watcher on a
+    Firestore-managed thread and marshals callbacks back to the asyncio loop
+    via `asyncio.run_coroutine_threadsafe`. (Plan §B concurrency model row;
+    §G open question 2.)
+
+    Kept separate from the async client so async/sync internals don't
+    interact.
+    """
+    try:
+        from google.cloud import firestore  # type: ignore[import-untyped]
+
+        return firestore.Client()
+    except Exception:
+        logger.warning(
+            "Firestore sync client construction failed; HND listener disabled "
+            "(stub mode)"
+        )
+        return None
+
+
 def _build_bigquery_client() -> Any:
     try:
         from google.cloud import bigquery  # type: ignore[import-untyped]
@@ -294,6 +319,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
 
     # 3. Cloud client construction
     fs_client = _build_firestore_client()
+    fs_sync_client = _build_firestore_sync_client()
     bq_client = _build_bigquery_client()
     storage_client = _build_storage_client()
 
@@ -325,7 +351,11 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
     from agents.scouts.desk import ScoutDesk
     from agents.editor.agent import EditorAgent
 
-    hnd = HndDetector(firestore=fs_client, wire=wire_emitter)
+    hnd = HndDetector(
+        firestore=fs_client,
+        firestore_sync=fs_sync_client,
+        wire=wire_emitter,
+    )
     scout_desk = ScoutDesk(
         prompts=prompts,
         wire=wire_emitter,
@@ -333,6 +363,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         firestore=fs_client,
         hnd=hnd,
         scout_model=env["model_scouts"],
+        cost_counter=cost_counter,
     )
     # NOTE: editor.runtime_state is set AFTER RuntimeState construction
     # below, but EditorAgent already stores the ref so the assignment lands.
