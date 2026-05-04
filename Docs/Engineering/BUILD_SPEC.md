@@ -958,7 +958,8 @@ Target: a new event every 4-8 seconds during normal operation. Ambient pace, not
 The `compression_factor: float` parameter lives on the **investigation context** (per-investigation, not global). Default is `1.0` (real-time ambient cadence). The live URL hero CTA submission triggers a fresh investigation with `compression_factor=0.25` (4× faster cadence). Ambient Wire activity continues at `1.0` independently.
 
 **Implementation (`/agents/wire/pacing.py`):**
-- Each Scout / Investigator / Storyteller per-emission delay is `target_delay_s / compression_factor` (e.g., a 6s think pause becomes 1.5s at compression 0.25).
+- Each Scout / Investigator / Storyteller per-emission delay is **`target_delay_s × compression_factor`** (e.g., a 6s think pause becomes 1.5s at `compression_factor=0.25` — 4× faster cadence). The earlier v1.3 prose said "target / compression_factor" which contradicted the worked example; multiplicative is correct, the worked example is canonical, and the shipped code in `/agents/wire/pacing.py` matches. (Corrected 2026-05-04 after Day-2 implementation surfaced the contradiction; see HOE-HANDOFF Session 2 work log.)
+- `compression_factor` is bounded `[0.05, 1.0]`: 1.0 is ambient (no compression); values <1.0 compress; values >1.0 are refused (the room is meditative — nothing should run faster than 20× ambient).
 - Wire event fields include `compression_factor` for transparency. The frontend renders the honest label *"Live investigation — playback at 4×"* whenever any non-1.0 events are in the active scroll window.
 - Event `timestamp` reflects real wall-clock emission time. The cadence is what compresses, not the timestamps. (Per CONSTITUTION Rule 3 — "honest production, not faked liveness.")
 - Compression applies only to the affected investigation's events; ambient Wire stays at 1.0. (HOE-DEC-021.)

@@ -1,6 +1,6 @@
 # tech_snapshot.md — Ground truth for the runtime environment
 
-**Last refreshed:** 2026-05-04 by HoE Session 2 (Day-2 agent-runtime skeleton landed; full lifespan boot verified against live Vertex AI + BigQuery; 64 unit tests + 1 skipped; all three health endpoints green)
+**Last refreshed:** 2026-05-04 by HoE Session 2 (Day-2 agent-runtime skeleton landed; full lifespan boot verified against live Vertex AI + BigQuery; 64 unit tests + 1 skipped; all three health endpoints green; BUILD_SPEC §6.10 compression-formula contradiction corrected per HOE-DEC-029)
 
 This file is the **runtime ground truth**: what's actually provisioned, what model IDs respond, what voices exist, what env vars are set. Refresh this on **every infra change**. Distinct from:
 - `BUILD_SPEC.md` = the plan (architecture, rules, schemas)
