@@ -66,6 +66,52 @@ class _FakeWire:
         return "fake-wire-id"
 
 
+class _SeededColl:
+    """Collection stub seeded with documents for the equity-recommendation tests."""
+
+    def __init__(self, docs: list[dict] | None = None) -> None:
+        self._docs = docs or []
+        self.added: list[dict] = []
+
+    def where(self, *args, **kwargs) -> "_SeededColl":
+        return self
+
+    def order_by(self, *args, **kwargs) -> "_SeededColl":
+        return self
+
+    def limit(self, n: int) -> "_SeededColl":
+        return self
+
+    def stream(self):
+        return [_SeededDoc(d) for d in self._docs]
+
+    def add(self, doc: dict) -> tuple:
+        self.added.append(dict(doc))
+        return (mock.Mock(), mock.Mock(id=f"fs-{len(self.added)}"))
+
+
+class _SeededDoc:
+    def __init__(self, data: dict) -> None:
+        self._data = data
+        self.id = data.get("id", "fake-id")
+        self.exists = True
+
+    def to_dict(self) -> dict:
+        return dict(self._data)
+
+
+class _SeededFirestore:
+    """Routing stub for tests that need a specific seeded collection."""
+
+    def __init__(self, *, equity_interventions: list[dict] | None = None) -> None:
+        self.collections: dict[str, _SeededColl] = {
+            "equity_interventions": _SeededColl(equity_interventions or []),
+        }
+
+    def collection(self, name: str) -> _SeededColl:
+        return self.collections.setdefault(name, _SeededColl())
+
+
 @dataclass
 class _FakeRuntimeState:
     last_think_cycle: datetime | None = None
@@ -338,6 +384,209 @@ async def test_pull_vocabulary_tool_returns_filled_fragment():
 
 
 @pytest.mark.asyncio
+async def test_accept_equity_recommendation_reads_intervention_and_writes_response():
+    """The bound `accept_equity_recommendation` tool reads the intervention
+    doc, writes back `editor_response='accepted'`, and emits a Wire decision.
+    """
+    wire = _FakeWire()
+    firestore = _SeededFirestore(
+        equity_interventions=[
+            {
+                "id": "intv-001",
+                "intervention_id": "intv-001",
+                "kind": "feed_drift",
+                "reason": "Last 4 places Olympic-heavy",
+                "suggested_priority_lift_story_unit_id": "us-al-birmingham",
+                "editor_response": None,
+                "editor_response_at": None,
+                "created_at": "2026-05-02T01:00:00+00:00",
+            }
+        ]
+    )
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=wire,
+        scout_desk=mock.Mock(),
+        firestore=firestore,
+        model_id="gemini-3.1-pro-preview",
+    )
+    accept_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "accept_equity_recommendation"
+    )
+
+    result = await accept_tool("intv-001")
+
+    assert result["accepted"] is True
+    assert result["intervention_id"] == "intv-001"
+    assert result["suggested_priority_lift_story_unit_id"] == "us-al-birmingham"
+    assert result["persisted"] is True
+    # Most-recent add() to /equity_interventions/ has editor_response='accepted'.
+    added = firestore.collections["equity_interventions"].added
+    assert len(added) == 1
+    assert added[0]["editor_response"] == "accepted"
+    assert added[0]["editor_response_at"] is not None
+    # A decision-style Wire event was emitted.
+    decision_events = [
+        e for e in wire.emitted if e.get("message_type") == "decision"
+    ]
+    assert len(decision_events) == 1
+    assert decision_events[0]["story_unit_id"] == "us-al-birmingham"
+
+
+@pytest.mark.asyncio
+async def test_request_equity_review_dispatches_to_equity_editor():
+    """The bound `request_equity_review` tool dispatches to
+    equity_editor.review_feed() / review_draft() based on scope."""
+    equity_editor = mock.Mock()
+    equity_editor.review_feed = mock.AsyncMock(
+        return_value={"action": "ok", "tool_calls": [], "latency_ms": 1100}
+    )
+    equity_editor.review_draft = mock.AsyncMock(
+        return_value={
+            "action": "ok",
+            "decision": "cleared",
+            "draft_id": "draft-001",
+            "tool_calls": [],
+            "latency_ms": 800,
+        }
+    )
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+        equity_editor=equity_editor,
+    )
+    request_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "request_equity_review"
+    )
+
+    # scope='feed' branch.
+    feed_result = await request_tool(scope="feed")
+    assert feed_result["action"] == "ok"
+    equity_editor.review_feed.assert_awaited_once()
+
+    # scope='draft' branch.
+    draft_result = await request_tool(scope="draft", draft_id="draft-001")
+    assert draft_result["decision"] == "cleared"
+    equity_editor.review_draft.assert_awaited_once_with("draft-001")
+
+
+@pytest.mark.asyncio
+async def test_request_equity_review_returns_error_when_uninitialized():
+    """Without an equity_editor, the tool returns an error dict."""
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+    )
+    request_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "request_equity_review"
+    )
+    result = await request_tool(scope="feed")
+    assert result["dispatched"] is False
+    assert "equity_editor" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_storyteller_calls_storyteller_write_story():
+    """Editor's bound `dispatch_storyteller` tool forwards to
+    storyteller.write_story(investigation_packet_id) and surfaces the
+    cleared/returned/killed shape."""
+    storyteller = mock.Mock()
+    storyteller.write_story = mock.AsyncMock(
+        return_value={
+            "action": "cleared",
+            "draft_id": "draft-001",
+            "revisions_count": 0,
+            "final_decision": "cleared",
+            "latency_ms": 4500,
+            "investigation_packet_id": "pkt-001",
+        }
+    )
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+        storyteller=storyteller,
+    )
+    dispatch_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "dispatch_storyteller"
+    )
+    result = await dispatch_tool("pkt-001")
+
+    assert result["dispatched"] is True
+    assert result["action"] == "cleared"
+    assert result["draft_id"] == "draft-001"
+    storyteller.write_story.assert_awaited_once_with("pkt-001")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_narrator_calls_narrator_narrate_with_cleared_draft():
+    """Editor's bound `dispatch_narrator` tool reads the draft from
+    Firestore, validates it's cleared, converts to NarrationManifest
+    input shape, and calls narrator.narrate."""
+    narrator = mock.Mock()
+    narrator.narrate = mock.AsyncMock(
+        return_value={
+            "story_id": "draft-001",
+            "audio_urls": ["gs://bucket/draft-001/0.mp3"],
+            "audio_duration_ms": 12000,
+            "voice_name": "Algenib",
+        }
+    )
+
+    cleared_draft = {
+        "id": "draft-001",
+        "headline": "A small Iowa county keeps producing Olympians and Paralympians",
+        "dek": "The pattern took shape from a single high-school program.",
+        "body": "The county sits at the foot of the regional pipeline. " * 30,
+        "hometown_panel": "The town's first Olympian came in 1976.",
+        "historical_echo": "The pattern echoes the 1960s post-war track-and-field era.",
+        "place_name": "Mt Pleasant, Iowa",
+        "era_reference": "1960s post-war track-and-field",
+        "publish_gate_decision": "cleared",
+    }
+    firestore = _SeededFirestore()
+    firestore.collections["story_drafts"] = _SeededColl([cleared_draft])
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=firestore,
+        model_id="gemini-3.1-pro-preview",
+        narrator=narrator,
+    )
+    dispatch_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "dispatch_narrator"
+    )
+    result = await dispatch_tool("draft-001")
+
+    assert result["dispatched"] is True
+    assert result["manifest"]["story_id"] == "draft-001"
+    narrator.narrate.assert_awaited_once()
+    awaited = narrator.narrate.await_args
+    narration_input = awaited.args[0]
+    assert narration_input["story_id"] == "draft-001"
+    assert narration_input["place_name_for_cues"] == "Mt Pleasant, Iowa"
+    assert narration_input["era_reference_for_cues"] == "1960s post-war track-and-field"
+    assert awaited.kwargs.get("voice_profile") == "broadcast"
+
+
+@pytest.mark.asyncio
 async def test_think_once_records_tool_calls_and_tokens():
     """When the Runner returns tool calls + usage metadata, the Editor
     surfaces them in the result and increments the cost counter."""
@@ -381,3 +630,49 @@ async def test_think_once_records_tool_calls_and_tokens():
     assert inc_kwargs["axis"] == "gemini_pro"
     assert inc_kwargs["input_tokens"] == 1200
     assert inc_kwargs["output_tokens"] == 80
+
+
+@pytest.mark.asyncio
+async def test_dispatch_publish_gate_calls_publish_gate_review():
+    """Editor's bound `dispatch_publish_gate` tool forwards to
+    publish_gate.review(story_draft_id=...) and surfaces the audit dict.
+    """
+    publish_gate = mock.Mock()
+    publish_gate.review = mock.AsyncMock(
+        return_value={
+            "audit_id": "aud-001",
+            "story_id": "draft-001",
+            "investigation_packet_id": "pkt-001",
+            "sub_stages": {
+                "fact_check": {"passed": True},
+                "source_review": {"passed": True},
+                "parity_review": {"passed": True},
+                "nil_redaction_review": {"passed": True},
+                "safety_review": {"passed": True},
+                "language_review": {"passed": True},
+                "visual_review": {"passed": True},
+            },
+            "final_decision": "cleared",
+            "completed_at": "2026-05-02T00:00:00+00:00",
+            "revisions_requested": [],
+        }
+    )
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=_FakeFirestore(),
+        model_id="gemini-3.1-pro-preview",
+        publish_gate=publish_gate,
+    )
+    dispatch_tool = next(
+        t for t in editor._bound_tools  # type: ignore[attr-defined]
+        if getattr(t, "__name__", "") == "dispatch_publish_gate"
+    )
+    result = await dispatch_tool("draft-001")
+
+    assert result["dispatched"] is True
+    assert result["audit"]["final_decision"] == "cleared"
+    assert result["audit"]["story_id"] == "draft-001"
+    publish_gate.review.assert_awaited_once_with(story_draft_id="draft-001")

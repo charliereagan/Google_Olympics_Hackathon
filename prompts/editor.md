@@ -35,8 +35,14 @@ directly.
 - `read_queue()` — current queue of investigations and lead reports.
 - `dispatch_scout(scout_id, story_unit_id)` — send a sub-scout to
   investigate. Sub-scouts: `cinderella`, `comeback`, `hometown`, `echo`.
-- `accept_equity_recommendation(recommendation_id)` — apply a feed-
-  drift correction from the Paralympic Equity Editor.
+- `accept_equity_recommendation(intervention_id)` — apply a feed-
+  drift intervention from the Paralympic Equity Editor. Reads the
+  intervention from `/equity_interventions/`, writes back
+  `editor_response='accepted'`, emits a Wire decision event.
+- `request_equity_review(scope='feed', draft_id=None)` — ask the
+  Paralympic Equity Editor to audit. `scope='feed'` for periodic
+  feed-level parity checks; `scope='draft'` (with `draft_id`) for a
+  story-level review.
 - `pull_vocabulary(message_type='thinking', **slots)` — pull a curated
   voice-fragment from the Wire Vocabulary library; fill [slot]s; use as
   the wire_emit message text for in-progress thinking events.

@@ -74,7 +74,10 @@ class RuntimeState:
     editor: Any = None
     scout_desk: Any = None
     investigator: Any = None
+    equity_editor: Any = None
+    storyteller: Any = None
     narrator: Any = None
+    publish_gate: Any = None
     nil_layer: Any = None
     wire_emitter: Any = None
     pacer_factory: Callable[[float], Any] | None = None
@@ -348,12 +351,12 @@ def _build_placeholder_agents(prompts: dict[str, str], model_id: str) -> dict[st
         "This agent's body lands in Day N — see HOE-HANDOFF.md. Day-2 only "
         "constructs the shell so the seven-cast surface is complete."
     )
-    names = [
-        "equity_editor",
-        "storyteller",
-        "publish_gate",
-    ]
+    names: list[str] = []
     agents: dict[str, Any] = {}
+    if not names:
+        # Day-6: every agent in the seven-cast is now real. Empty
+        # placeholder map is the steady state.
+        return agents
     try:
         from google.adk.agents import LlmAgent  # type: ignore[import-untyped]
 
@@ -481,6 +484,20 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         cost_counter=cost_counter,
         wire_vocabulary=wire_vocabulary,
     )
+    # Equity Editor (Day-6): Pro-tier; parity enforcement at three levels.
+    # Mirrors the Editor / Investigator pattern — see
+    # agents/equity_editor/agent.py. Invoked by the Editor (and the
+    # Storyteller, once shipped) via review_feed() / review_draft().
+    from agents.equity_editor import EquityEditorAgent
+    equity_editor = EquityEditorAgent(
+        prompt=prompts["equity_editor"],
+        wire=wire_emitter,
+        firestore=fs_client,
+        bigquery=bq_client,
+        model_id=env["model_editor"],  # Pro tier per BUILD_SPEC §3.1
+        cost_counter=cost_counter,
+        wire_vocabulary=wire_vocabulary,
+    )
     # Narrator (Day-5): deterministic Gemini Flash TTS synthesis. Not an LLM
     # Runner — `narrate(draft)` calls the TTS endpoint directly per
     # BUILD_SPEC §5.6. Voices pinned via HOE-DEC-025 (Algenib / Fenrir).
@@ -497,6 +514,55 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         cost_counter=cost_counter,
         bucket_name="storytellers-room-audio",
     )
+    # Storyteller (Day-6): Pro-tier literary-restraint specialist.
+    # Mirrors the Editor / Investigator / Equity Editor pattern — see
+    # agents/storyteller/agent.py. Invoked by the Editor's
+    # `dispatch_storyteller(investigation_packet_id)` tool. The
+    # `_runtime_state` backref is set after RuntimeState construction
+    # below so its `request_equity_review` and `request_publish_gate`
+    # tools can locate the live agent instances.
+    from agents.storyteller import StorytellerAgent
+    storyteller = StorytellerAgent(
+        prompt=prompts["storyteller"],
+        wire=wire_emitter,
+        firestore=fs_client,
+        bigquery=bq_client,
+        model_id=env["model_editor"],  # Pro tier per BUILD_SPEC §3.1
+        cost_counter=cost_counter,
+        wire_vocabulary=wire_vocabulary,
+    )
+    # Publish Gate (Day-6): seven-sub-stage governance gate. Mirrors the
+    # other agents' constructor shape — see agents/publish_gate/orchestrator.py.
+    # Invoked by the Editor's `dispatch_publish_gate` tool. The
+    # `_runtime_state` backref is set after RuntimeState construction below.
+    from agents.publish_gate import (
+        FactCheckSubstage,
+        LanguageReviewSubstage,
+        ParityReviewSubstage,
+        PublishGateAgent,
+        SafetyReviewSubstage,
+        SourceReviewSubstage,
+        VisualReviewSubstage,
+    )
+    publish_gate = PublishGateAgent(
+        prompt=prompts.get("publish_gate", ""),
+        wire=wire_emitter,
+        firestore=fs_client,
+        nil_layer=nil_layer,
+        fact_check=FactCheckSubstage(
+            model_id=env["model_editor"],
+            cost_counter=cost_counter,
+        ),
+        source_review=SourceReviewSubstage(),
+        parity_review=ParityReviewSubstage(),
+        safety_review=SafetyReviewSubstage(
+            cost_counter=cost_counter,
+        ),
+        language_review=LanguageReviewSubstage(),
+        visual_review=VisualReviewSubstage(),
+        cost_counter=cost_counter,
+        wire_vocabulary=wire_vocabulary,
+    )
     # NOTE: editor.runtime_state is set AFTER RuntimeState construction
     # below, but EditorAgent already stores the ref so the assignment lands.
     editor = EditorAgent(
@@ -508,6 +574,10 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         cost_counter=cost_counter,
         wire_vocabulary=wire_vocabulary,
         investigator=investigator,
+        equity_editor=equity_editor,
+        storyteller=storyteller,
+        narrator=narrator,
+        publish_gate=publish_gate,
     )
     placeholder_agents = _build_placeholder_agents(prompts, env["model_editor"])
 
@@ -528,7 +598,10 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         editor=editor,
         scout_desk=scout_desk,
         investigator=investigator,
+        equity_editor=equity_editor,
+        storyteller=storyteller,
         narrator=narrator,
+        publish_gate=publish_gate,
         nil_layer=nil_layer,
         wire_emitter=wire_emitter,
         cost_counter=cost_counter,
@@ -547,7 +620,10 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
     # RuntimeState — done after construction to break the chicken-and-egg.
     editor._runtime_state = _state  # type: ignore[attr-defined]
     investigator._runtime_state = _state  # type: ignore[attr-defined]
+    equity_editor._runtime_state = _state  # type: ignore[attr-defined]
+    storyteller._runtime_state = _state  # type: ignore[attr-defined]
     narrator._runtime_state = _state  # type: ignore[attr-defined]
+    publish_gate._runtime_state = _state  # type: ignore[attr-defined]
     logger.info("agent-runtime: boot complete")
 
     try:
@@ -848,9 +924,24 @@ def _build_app():
                 "name": getattr(s.investigator, "name", "investigator"),
                 "status": "idle",
             }
+        if s.equity_editor is not None:
+            agents["equity_editor"] = {
+                "name": getattr(s.equity_editor, "name", "equity_editor"),
+                "status": "idle",
+            }
+        if s.storyteller is not None:
+            agents["storyteller"] = {
+                "name": getattr(s.storyteller, "name", "storyteller"),
+                "status": "idle",
+            }
         if s.narrator is not None:
             agents["narrator"] = {
                 "name": getattr(s.narrator, "name", "narrator"),
+                "status": "idle",
+            }
+        if s.publish_gate is not None:
+            agents["publish_gate"] = {
+                "name": getattr(s.publish_gate, "name", "publish_gate"),
                 "status": "idle",
             }
         for name, a in s.placeholder_agents.items():
