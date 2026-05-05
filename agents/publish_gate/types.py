@@ -107,14 +107,34 @@ class NilRedactionResult(TypedDict, total=False):
 
 
 class VisualReviewResult(TypedDict, total=False):
-    """Sub-stage 7 — Visual Review (BUILD_SPEC §5.7).
+    """Sub-stage 7 — Visual Review (BUILD_SPEC §5.7 + §7.4 + CONSTITUTION Law 6).
 
-    Day-7 work. Day-6 ships a stub that auto-passes.
+    The Visualizer generates three assets (hero, hometown panel, historical
+    echo) BEFORE this sub-stage runs. Sub-stage 7 then validates each asset
+    against three checks:
+      - Photorealism: must read as 'editorial illustration', not photo.
+      - Likeness: must NOT contain identifiable individual faces.
+      - Protected marks: must NOT contain Olympic rings, Paralympic Agitos,
+        LA28 logomark, Olympic torch, Team USA logos, or any third-party
+        corporate logo other than Google Cloud.
+
+    `regenerations` counts how many times the Visualizer was re-invoked
+    after a failed check; max 3 regenerations per HOE-DEC-020. On the 4th
+    failure the Visualizer returns the curated Day-9 fallback hero.
+
+    `failed_reasons` is a list of strings naming which check failed (e.g.,
+    'photorealistic', 'identifiable_likeness', 'protected_mark_olympic_rings',
+    'vision_call_unavailable'). Empty when passed=True.
+
+    `stub` survives as an opt-in flag for the legacy Day-6 stub path; the
+    Day-7 real check leaves it absent (or sets it to False).
     """
 
     regenerations: int
     passed: bool
-    stub: bool   # True until Day-7 implements the real check
+    failed_reasons: list[str]
+    images_checked: list[str]   # which asset URLs were inspected
+    stub: bool                  # legacy Day-6 stub flag
 
 
 # --- Audit envelope ----------------------------------------------------------

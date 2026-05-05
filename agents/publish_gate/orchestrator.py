@@ -92,6 +92,7 @@ class PublishGateAgent:
         safety_review: Any,
         language_review: Any,
         visual_review: Any | None = None,
+        visualizer: Any | None = None,
         cost_counter: Any | None = None,
         wire_vocabulary: Any | None = None,
         runtime_state: Any | None = None,
@@ -114,6 +115,12 @@ class PublishGateAgent:
             from agents.publish_gate.visual_review import VisualReviewSubstage
             visual_review = VisualReviewSubstage()
         self._visual_review = visual_review
+        # Visualizer is optional in tests. When None and Visual Review is
+        # asked to inspect images, the orchestrator skips the generation
+        # step and passes empty assets to Visual Review (which fails
+        # closed with reason='no_assets'). In production runtime, a real
+        # Visualizer is always injected.
+        self._visualizer = visualizer
         self._cost_counter = cost_counter
         self._wire_vocabulary = wire_vocabulary
         self._runtime_state = runtime_state
@@ -204,7 +211,7 @@ class PublishGateAgent:
             },
         ):
             t0 = time.monotonic()
-            sub_stages, first_failure = await self._run_substages(
+            sub_stages, first_failure, visualizer_assets = await self._run_substages(
                 story_draft=draft,
                 investigation_packet=packet,
                 investigation_id=investigation_id,
@@ -240,8 +247,10 @@ class PublishGateAgent:
         # --- Persist + emit ------------------------------------------------
         if final_decision == "cleared":
             await self._write_publish_audit(audit)
+            asset_urls = _asset_urls_from_visualizer(visualizer_assets)
             await self._mark_publish_gate_decision(
-                story_draft_id, "cleared"
+                story_draft_id, "cleared",
+                asset_urls=asset_urls,
             )
             await self._emit_milestone_with_vocabulary(
                 free_text="Cleared for publication.",
@@ -309,11 +318,17 @@ class PublishGateAgent:
         story_draft: dict,
         investigation_packet: dict,
         investigation_id: str,
-    ) -> tuple[dict, str | None]:
-        """Run all 7 sub-stages in order. Return (sub_stages_dict, first_failure_name).
+    ) -> tuple[dict, str | None, dict | None]:
+        """Run all 7 sub-stages in order.
 
-        first_failure_name is the canonical sub-stage key that failed first
-        (e.g., 'fact_check'); None if every sub-stage passed.
+        Returns ``(sub_stages_dict, first_failure_name, visualizer_assets)``.
+
+        - first_failure_name is the canonical sub-stage key that failed
+          first (e.g., 'fact_check'); None if every sub-stage passed.
+        - visualizer_assets is the dict from `Visualizer.generate_assets`,
+          or None if the orchestrator was constructed without a Visualizer
+          (test-stub mode). The orchestrator persists the asset URLs onto
+          the cleared draft so the Broadcast renderer can find them.
         """
         story_unit_id = story_draft.get("story_unit_id")
         sub_stages: dict[str, Any] = {}
@@ -379,12 +394,15 @@ class PublishGateAgent:
         if first_failure is None and not _passed(parity):
             first_failure = "parity_review"
 
-        # Sub-stage 4: NIL Redaction (Day-2 stub: direct-match + redact).
+        # Sub-stage 4: NIL Redaction Review.
+        # Day-7: prefer the full Layer's async `scan_broadcast` so the
+        # broadcast surface runs the FULL pipeline (direct match +
+        # disambiguation + near-id Flash-Lite + small-aggregate). The
+        # Day-2 stub doesn't expose `scan_broadcast`; we fall back to its
+        # sync `scan_wire` for backward compatibility.
         nil = await self._run_one_substage(
             name="nil_redaction_review",
-            invoke=lambda: _wrap_sync(
-                _run_nil_redaction(self._nil_layer, story_draft)
-            ),
+            invoke=lambda: _run_nil_redaction_async(self._nil_layer, story_draft),
             investigation_id=investigation_id,
         )
         sub_stages["nil_redaction_review"] = nil
@@ -437,12 +455,16 @@ class PublishGateAgent:
         if first_failure is None and not _passed(language):
             first_failure = "language_review"
 
-        # Sub-stage 7: Visual Review (Day-6 stub: auto-pass).
-        visual = await self._run_one_substage(
-            name="visual_review",
-            invoke=lambda: _wrap_sync(
-                self._visual_review.review(story_draft=story_draft)
-            ),
+        # --- Pre sub-stage 7: Visualizer (HOE-DEC-020) ------------------
+        # The Visualizer is a tool the Publish Gate calls (CONSTITUTION
+        # Rule 2; BUILD_SPEC §5.7.1). It runs AFTER NIL clearance and
+        # BEFORE Visual Review. The orchestrator owns the regeneration
+        # loop: up to 3 regenerations on Visual Review failure, then a
+        # curated Day-9 fallback.
+        visualizer_assets, visual = await self._generate_and_review_visuals(
+            story_draft=story_draft,
+            investigation_packet=investigation_packet,
+            story_unit_id=story_unit_id,
             investigation_id=investigation_id,
         )
         sub_stages["visual_review"] = visual
@@ -455,7 +477,13 @@ class PublishGateAgent:
         if first_failure is None and not _passed(visual):
             first_failure = "visual_review"
 
-        return sub_stages, first_failure
+        # Persist the asset URLs back onto the draft so the Broadcast
+        # renderer can find them. Only on a passing Visual Review (or
+        # when the orchestrator handed the draft a fallback hero).
+        if visualizer_assets is not None:
+            self._stash_assets_on_draft(story_draft, visualizer_assets)
+
+        return sub_stages, first_failure, visualizer_assets
 
     async def _run_one_substage(
         self,
@@ -494,6 +522,187 @@ class PublishGateAgent:
             "passed": False,
             "error": f"{name}_exception",
         }
+
+    # -- Visualizer + Visual Review regeneration loop -----------------------
+
+    async def _generate_and_review_visuals(
+        self,
+        *,
+        story_draft: dict,
+        investigation_packet: dict,
+        story_unit_id: str | None,
+        investigation_id: str,
+    ) -> tuple[dict | None, dict]:
+        """Generate hero + utility images, then run Visual Review.
+
+        On failure, regenerate with progressively stricter prompts (HOE-
+        DEC-020 + BUILD_SPEC §17.2). Up to 3 regenerations; on the 4th
+        failure, fall back to the curated Day-9 hero. Returns
+        ``(assets_dict_or_None, visual_review_result_dict)``.
+
+        ``assets_dict_or_None`` is None when the Visualizer is absent
+        (test stubs); the orchestrator then has no URLs to stash.
+        """
+        if self._visualizer is None:
+            # Test path / Day-6 stub mode: skip generation, hand
+            # the Visual Review sub-stage empty assets so its existing
+            # contract (Day-6 stub auto-passes) still holds.
+            try:
+                # Day-6 stubs in tests use `review(story_draft=...)`;
+                # the Day-7 sub-stage uses `review(visualizer_assets=...)`.
+                # Try the Day-7 signature first, fall back to Day-6.
+                try:
+                    result = self._visual_review.review(
+                        story_draft=story_draft,
+                        visualizer_assets={},
+                        investigation_id=investigation_id,
+                    )
+                except TypeError:
+                    result = self._visual_review.review(
+                        story_draft=story_draft
+                    )
+                if asyncio.iscoroutine(result) or hasattr(result, "__await__"):
+                    result = await result
+                return None, dict(result) if result is not None else {"passed": False}
+            except Exception:
+                logger.exception(
+                    "publish_gate.visual_review (no visualizer): review raised"
+                )
+                return None, {"passed": False, "error": "visual_review_exception"}
+
+        max_regen = int(getattr(self._visualizer, "max_regenerations", 3))
+        regenerations = 0
+        assets: dict = {}
+        last_review: dict = {}
+
+        while True:
+            # Stricter prompt level escalates with each regeneration: 0
+            # for the initial attempt, then 1 / 2 / 3.
+            stricter_level = regenerations
+            try:
+                assets = await self._visualizer.generate_assets(
+                    story_draft=story_draft,
+                    investigation_packet=investigation_packet,
+                    wire=self._wire,
+                    investigation_id=investigation_id,
+                    stricter_level=stricter_level,
+                )
+            except Exception as e:
+                logger.warning(
+                    "publish_gate.visualizer.generate_assets failed "
+                    "(stricter=%d): %s",
+                    stricter_level, e,
+                )
+                # Treat generation failure as a Visual Review fail with
+                # the same regeneration budget — the orchestrator's job
+                # is to either retry or fall back, regardless of which
+                # side blew up.
+                last_review = {
+                    "passed": False,
+                    "regenerations": regenerations,
+                    "failed_reasons": [f"generation_error:{type(e).__name__}"],
+                    "images_checked": [],
+                }
+                if regenerations >= max_regen:
+                    break
+                regenerations += 1
+                continue
+
+            # Run Visual Review against the freshly-generated assets.
+            try:
+                review_call = self._visual_review.review(
+                    story_draft=story_draft,
+                    visualizer_assets=assets,
+                    wire=self._wire,
+                    investigation_id=investigation_id,
+                    regenerations=regenerations,
+                )
+                if asyncio.iscoroutine(review_call) or hasattr(
+                    review_call, "__await__"
+                ):
+                    review_result = await review_call
+                else:
+                    review_result = review_call
+            except Exception as e:
+                logger.warning(
+                    "publish_gate.visual_review.review raised: %s", e
+                )
+                review_result = {
+                    "passed": False,
+                    "regenerations": regenerations,
+                    "failed_reasons": [f"review_error:{type(e).__name__}"],
+                    "images_checked": [],
+                }
+
+            last_review = (
+                dict(review_result) if review_result is not None else {"passed": False}
+            )
+            last_review.setdefault("regenerations", regenerations)
+
+            if last_review.get("passed"):
+                return assets, last_review
+
+            if regenerations >= max_regen:
+                break
+            regenerations += 1
+
+        # Exhausted the regeneration budget: fall back to the curated
+        # Day-9 hero (HOE-DEC-020). The fallback hero replaces ONLY the
+        # hero URL — utility panels carry their last-rendered values.
+        logger.warning(
+            "publish_gate: visual review exhausted %d regenerations; "
+            "falling back to curated hero",
+            regenerations,
+        )
+        try:
+            fallback_url = await self._visualizer.fallback_hero(
+                story_unit_id=story_unit_id or "unknown"
+            )
+            assets = dict(assets or {})
+            assets["hero_url"] = fallback_url
+            assets["fallback_used"] = True
+        except Exception:
+            logger.exception(
+                "publish_gate: visualizer.fallback_hero raised"
+            )
+
+        # Emit a milestone-style thinking event so the audit drawer
+        # shows the working-room recovery (BUILD_SPEC §17.2).
+        await self._safe_emit_thinking(
+            "visual review used pre-cached fallback hero "
+            f"after {regenerations} regenerations",
+            investigation_id=investigation_id,
+            story_unit_id=story_unit_id,
+        )
+
+        # Final result reflects the regeneration count + the fallback
+        # path, but stays passed=False so the orchestrator surfaces the
+        # exhaustion in the audit. The fallback URL is what the renderer
+        # will use; the audit captures that we hit the budget.
+        last_review["regenerations"] = regenerations
+        last_review["fallback_used"] = True
+        return assets, last_review
+
+    def _stash_assets_on_draft(self, story_draft: dict, assets: dict) -> None:
+        """Mutate the story_draft in place with the asset URLs.
+
+        The actual Firestore write happens in `_mark_publish_gate_decision`
+        — which already reads the draft, applies a payload patch, and
+        writes back. We piggy-back on that by setting fields on the
+        in-memory draft dict; the cleared-path write picks them up.
+        """
+        if not isinstance(story_draft, dict) or not isinstance(assets, dict):
+            return
+        for src_key, draft_key in (
+            ("hero_url", "hero_image_url"),
+            ("hometown_panel_url", "hometown_panel_url"),
+            ("echo_panel_url", "echo_panel_url"),
+        ):
+            url = assets.get(src_key)
+            if url:
+                story_draft[draft_key] = url
+        if assets.get("fallback_used"):
+            story_draft["hero_image_fallback_used"] = True
 
     # -- Sub-stage Wire emit ------------------------------------------------
 
@@ -778,8 +987,14 @@ class PublishGateAgent:
         decision: str,
         *,
         feedback: str | None = None,
+        asset_urls: dict | None = None,
     ) -> None:
-        """Mutate the draft's publish_gate_decision (and revisions count)."""
+        """Mutate the draft's publish_gate_decision (and revisions count).
+
+        On a 'cleared' decision, also persists the Visualizer's asset
+        URLs (`hero_image_url`, `hometown_panel_url`, `echo_panel_url`)
+        if provided — these power the Broadcast page's hero rendering.
+        """
         if self._firestore is None or not hasattr(self._firestore, "collection"):
             return
         try:
@@ -841,6 +1056,16 @@ class PublishGateAgent:
             updated["equity_review"] = equity_review
             if feedback is not None:
                 updated["revision_request"] = feedback
+        # On cleared, persist any asset URLs so the Broadcast renderer
+        # can find them. The orchestrator passes `asset_urls=...` only
+        # when generating visuals succeeded.
+        if decision == "cleared" and asset_urls:
+            for k in ("hero_image_url", "hometown_panel_url", "echo_panel_url"):
+                v = asset_urls.get(k)
+                if v:
+                    updated[k] = v
+            if asset_urls.get("hero_image_fallback_used"):
+                updated["hero_image_fallback_used"] = True
 
         # Try doc_ref.update / set / coll.add.
         if doc_ref is not None and hasattr(doc_ref, "update"):
@@ -853,6 +1078,17 @@ class PublishGateAgent:
                     payload["equity_review"] = updated["equity_review"]
                     if feedback is not None:
                         payload["revision_request"] = feedback
+                if decision == "cleared" and asset_urls:
+                    for k in (
+                        "hero_image_url",
+                        "hometown_panel_url",
+                        "echo_panel_url",
+                    ):
+                        v = asset_urls.get(k)
+                        if v:
+                            payload[k] = v
+                    if asset_urls.get("hero_image_fallback_used"):
+                        payload["hero_image_fallback_used"] = True
                 res = doc_ref.update(payload)
                 if hasattr(res, "__await__"):
                     await res
@@ -919,17 +1155,21 @@ async def _wrap_sync(value: Any) -> Any:
     return value
 
 
-def _run_nil_redaction(nil_layer: Any, story_draft: dict) -> NilRedactionResult:
-    """Run the NIL Redaction Layer (Day-2 stub) against the draft body
-    and produce a sub-stage 4 result dict.
+async def _run_nil_redaction_async(
+    nil_layer: Any, story_draft: dict
+) -> NilRedactionResult:
+    """Run the NIL Redaction Layer against the draft body for sub-stage 4.
 
-    The Day-2 stub only does direct-match-and-redact via `scan_wire`. We
-    scan the draft body and tally matches; the layer's redacted_message
-    is not applied here (the Storyteller already passed the draft
-    through equity, and Wire-level enforcement runs on every emit). This
-    sub-stage's role is the AUDIT count.
+    Day-7: prefers the full Layer's async `scan_broadcast` so the broadcast
+    surface runs the FULL pipeline (direct match + disambiguation +
+    near-id Flash-Lite + small-aggregate). The Day-2 stub doesn't expose
+    `scan_broadcast`; we fall back to its sync `scan_wire` for backward
+    compatibility.
 
-    Returns a NilRedactionResult dict.
+    Returns a NilRedactionResult dict — the audit-level count, NOT the
+    rewritten body. (The Storyteller already passed the draft through
+    equity; Wire-level enforcement runs on every emit. This sub-stage's
+    role is the AUDIT count + return-to-Storyteller decision.)
     """
     if nil_layer is None or not getattr(nil_layer, "is_loaded", False):
         # Layer not loaded — fail closed at the audit level (the runtime
@@ -948,9 +1188,15 @@ def _run_nil_redaction(nil_layer: Any, story_draft: dict) -> NilRedactionResult:
 
     body = (story_draft or {}).get("body") or ""
     try:
-        scan = nil_layer.scan_wire(body, surface="wire", context=None)
+        scan_broadcast = getattr(nil_layer, "scan_broadcast", None)
+        if scan_broadcast is not None:
+            # Full Day-7 Layer — run the broadcast pipeline.
+            scan = await scan_broadcast(body, context=None)
+        else:
+            # Day-2 stub fallback — direct-match only via scan_wire.
+            scan = nil_layer.scan_wire(body, surface="wire", context=None)
     except Exception:
-        logger.exception("nil_redaction: scan_wire raised")
+        logger.exception("nil_redaction: scan raised")
         return NilRedactionResult(
             individual_refs_reviewed=0,
             direct_matches=0,
@@ -962,21 +1208,30 @@ def _run_nil_redaction(nil_layer: Any, story_draft: dict) -> NilRedactionResult:
             passed=False,
         )
 
-    direct_matches = int(scan.log.direct_matches_redacted or 0)
-    aggregations = int(scan.log.aggregations_applied or 0)
-    redacted = direct_matches  # Day-2 stub: every direct match is redacted.
+    log = scan.log
+    direct_matches = int(getattr(log, "direct_matches_redacted", 0) or 0)
+    aggregations = int(getattr(log, "aggregations_applied", 0) or 0)
+    near_ids = int(getattr(log, "near_identifications", 0) or 0)
+    small_aggs = int(getattr(log, "small_aggregates", 0) or 0)
+    redacted = direct_matches
+    # decision='return' on broadcast surface means a near-id was detected
+    # AND the Layer wants the draft returned to the Storyteller.
+    returned_to_storyteller = 1 if scan.decision == "return" else 0
 
-    # Pass when no individual references found.
+    # Pass criterion: scan decision is 'pass'. Aggregate / redact / return
+    # all surface as `passed=False` so the orchestrator returns the draft
+    # for revision (per CONSTITUTION §7 — the audit log shows the work,
+    # the Storyteller revises, and the system re-runs).
     passed = scan.decision == "pass"
 
     return NilRedactionResult(
-        individual_refs_reviewed=direct_matches + aggregations,
+        individual_refs_reviewed=direct_matches + aggregations + near_ids + small_aggs,
         direct_matches=direct_matches,
-        near_identifications=0,
-        small_aggregates=0,
+        near_identifications=near_ids,
+        small_aggregates=small_aggs,
         aggregated=aggregations,
         redacted=redacted,
-        returned_to_storyteller=0,
+        returned_to_storyteller=returned_to_storyteller,
         passed=passed,
     )
 
@@ -1037,9 +1292,16 @@ def _slots_for_substage(substage: str, result: Any) -> dict:
             "reason": "ok" if result.get("passed") else "restricted terms present",
         }
     if substage == "visual_review":
+        if result.get("stub"):
+            reason = "stub"
+        elif result.get("passed"):
+            reason = "ok"
+        else:
+            reasons = result.get("failed_reasons") or []
+            reason = ",".join(str(r) for r in reasons[:3]) if reasons else "fail"
         return {
             "n": int(result.get("regenerations") or 0),
-            "reason": "stub" if result.get("stub") else "ok",
+            "reason": reason,
         }
     return {}
 
@@ -1081,7 +1343,18 @@ def _free_text_for_substage(substage: str, result: Any) -> str:
         return f"language review: {flagged} flagged, {soften} predictive constructions."
     if substage == "visual_review":
         regen = int(result.get("regenerations") or 0)
-        return f"visual review: {regen} regenerations, cleared."
+        if result.get("passed"):
+            return f"visual review: {regen} regenerations, cleared."
+        if result.get("fallback_used"):
+            return (
+                f"visual review: {regen} regenerations exhausted; "
+                "fallback hero applied."
+            )
+        reasons = result.get("failed_reasons") or []
+        if reasons:
+            head = ", ".join(str(r) for r in reasons[:3])
+            return f"visual review: failed ({head})."
+        return "visual review: failed."
     return f"sub-stage {substage} complete."
 
 
@@ -1124,6 +1397,30 @@ def _render_revision_request(sub_stages: dict, first_failure: str | None) -> str
         if flagged:
             lines.append(f"flagged terms: {flagged}")
     return "\n".join(lines)
+
+
+def _asset_urls_from_visualizer(assets: dict | None) -> dict:
+    """Translate a Visualizer.generate_assets dict into draft-doc fields.
+
+    The Visualizer's keys are pipeline-internal (`hero_url`, etc.); the
+    Firestore draft schema uses `hero_image_url` / `hometown_panel_url` /
+    `echo_panel_url`. This helper does the rename + a copy of the
+    fallback flag.
+    """
+    if not isinstance(assets, dict):
+        return {}
+    out: dict = {}
+    for src, dst in (
+        ("hero_url", "hero_image_url"),
+        ("hometown_panel_url", "hometown_panel_url"),
+        ("echo_panel_url", "echo_panel_url"),
+    ):
+        v = assets.get(src)
+        if v:
+            out[dst] = v
+    if assets.get("fallback_used"):
+        out["hero_image_fallback_used"] = True
+    return out
 
 
 def _doc_to_dict(doc: Any) -> dict:

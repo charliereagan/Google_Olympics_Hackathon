@@ -383,3 +383,183 @@ async def test_review_writes_publish_audit_to_firestore_on_clear():
         "language_review",
         "visual_review",
     }
+
+
+# --- Day-7: Visualizer + Visual Review regeneration loop --------------------
+
+
+class _FakeVisualizer:
+    """Stub Visualizer that returns canned URLs and tracks call count."""
+
+    def __init__(
+        self,
+        *,
+        max_regenerations: int = 3,
+        urls_by_call: list[dict] | None = None,
+    ) -> None:
+        self.max_regenerations = max_regenerations
+        self._urls_by_call = list(
+            urls_by_call
+            or [
+                {
+                    "hero_url": "gs://hero/sd/hero.png",
+                    "hometown_panel_url": "gs://hero/sd/hometown.png",
+                    "echo_panel_url": "gs://hero/sd/echo.png",
+                    "regenerations": 0,
+                }
+            ]
+        )
+        self.calls: list[dict] = []
+        self.fallback_calls: list[str] = []
+
+    async def generate_assets(
+        self, *, story_draft, investigation_packet, wire=None,
+        investigation_id="ambient", stricter_level=0,
+    ):
+        self.calls.append({"stricter_level": stricter_level})
+        if self._urls_by_call:
+            return self._urls_by_call.pop(0)
+        return {
+            "hero_url": "gs://hero/sd/hero.png",
+            "hometown_panel_url": "gs://hero/sd/hometown.png",
+            "echo_panel_url": "gs://hero/sd/echo.png",
+            "regenerations": 0,
+        }
+
+    async def fallback_hero(self, *, story_unit_id):
+        self.fallback_calls.append(story_unit_id)
+        return f"gs://fallback/{story_unit_id}.png"
+
+
+def _make_async_substage_with_passthroughs(passing: list[bool]) -> Any:
+    """Async stub Visual Review whose `review(...)` cycles through `passing`."""
+
+    class _AsyncStub:
+        def __init__(self, p: list[bool]) -> None:
+            self._results = list(p)
+            self.calls: list[dict] = []
+
+        async def review(self, *, story_draft=None, visualizer_assets=None,
+                         wire=None, investigation_id="ambient",
+                         regenerations=0):
+            self.calls.append(
+                {
+                    "visualizer_assets": dict(visualizer_assets or {}),
+                    "regenerations": regenerations,
+                }
+            )
+            passed = self._results.pop(0) if self._results else True
+            return {
+                "passed": passed,
+                "regenerations": regenerations,
+                "failed_reasons": [] if passed else ["photorealistic:hero"],
+                "images_checked": list((visualizer_assets or {}).values()),
+            }
+
+    return _AsyncStub(passing)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_regenerates_image_on_visual_review_fail_then_falls_back():
+    """Visual Review fails 4 times → orchestrator hits Visualizer.fallback_hero.
+
+    Per HOE-DEC-020 + BUILD_SPEC §17.2 the orchestrator allows up to 3
+    regenerations (4 total Visualizer calls). On the 4th failure it
+    falls back to the curated Day-9 hero. The Visual Review sub-stage's
+    final result has `fallback_used=True`.
+    """
+    visualizer = _FakeVisualizer(max_regenerations=3)
+    visual_review = _make_async_substage_with_passthroughs(
+        passing=[False, False, False, False]  # always fails
+    )
+
+    fs = _FakeFirestore(
+        story_drafts=[_seed_draft()],
+        investigation_packets=[_seed_packet()],
+    )
+    pg = PublishGateAgent(
+        prompt="(test prompt)",
+        wire=_FakeWire(),
+        firestore=fs,
+        nil_layer=_FakeNilLayer(),
+        fact_check=_make_substage(True, claims_checked=10, claims_removed=0,
+                                  claims_softened=0, removed_claims=[],
+                                  softened_claims=[]),
+        source_review=_make_sync_substage(True, source_count=4,
+                                          outlets=["A", "B"]),
+        parity_review=_make_sync_substage(True, equity_cleared=True,
+                                          equity_feedback="ok"),
+        safety_review=_make_substage(True, invented_quotes=0,
+                                     private_info_flags=0,
+                                     failed_reasons=[], fallback_used=False),
+        language_review=_make_sync_substage(True, restricted_terms_flagged=0,
+                                            flagged_terms=[],
+                                            predictive_phrases_softened=0),
+        visual_review=visual_review,
+        visualizer=visualizer,
+        max_revisions=999,  # don't kill on visual_review fails for this test
+    )
+    audit = await pg.review(story_draft_id="draft-001")
+
+    # Visualizer was called 4 times (initial + 3 regenerations).
+    assert len(visualizer.calls) == 4
+    # stricter_level escalated 0 -> 3 across the four calls.
+    assert [c["stricter_level"] for c in visualizer.calls] == [0, 1, 2, 3]
+    # Visual Review was called 4 times.
+    assert len(visual_review.calls) == 4
+    # Fallback was invoked once on the 4th failure.
+    assert visualizer.fallback_calls == ["us-ia-mt-pleasant"]
+    # The visual_review sub-stage in the audit reflects the fallback.
+    visual_audit = audit["sub_stages"]["visual_review"]
+    assert visual_audit["fallback_used"] is True
+    assert visual_audit["regenerations"] == 3
+    # Orchestrator returns the draft (visual_review failed); no kill
+    # because max_revisions=999.
+    assert audit["final_decision"] == "returned"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_clears_when_visual_review_passes_after_one_regeneration():
+    """First Visualizer call fails review; second call passes → orchestrator clears."""
+    visualizer = _FakeVisualizer(max_regenerations=3)
+    visual_review = _make_async_substage_with_passthroughs(
+        passing=[False, True]  # second attempt passes
+    )
+
+    fs = _FakeFirestore(
+        story_drafts=[_seed_draft()],
+        investigation_packets=[_seed_packet()],
+    )
+    pg = PublishGateAgent(
+        prompt="(test prompt)",
+        wire=_FakeWire(),
+        firestore=fs,
+        nil_layer=_FakeNilLayer(),
+        fact_check=_make_substage(True, claims_checked=10, claims_removed=0,
+                                  claims_softened=0, removed_claims=[],
+                                  softened_claims=[]),
+        source_review=_make_sync_substage(True, source_count=4,
+                                          outlets=["A", "B"]),
+        parity_review=_make_sync_substage(True, equity_cleared=True,
+                                          equity_feedback="ok"),
+        safety_review=_make_substage(True, invented_quotes=0,
+                                     private_info_flags=0,
+                                     failed_reasons=[], fallback_used=False),
+        language_review=_make_sync_substage(True, restricted_terms_flagged=0,
+                                            flagged_terms=[],
+                                            predictive_phrases_softened=0),
+        visual_review=visual_review,
+        visualizer=visualizer,
+    )
+    audit = await pg.review(story_draft_id="draft-001")
+
+    # Two Visualizer calls (initial + one regeneration); zero fallback.
+    assert len(visualizer.calls) == 2
+    assert visualizer.fallback_calls == []
+    assert audit["final_decision"] == "cleared"
+    # The cleared draft has the asset URLs persisted.
+    drafts_coll = fs.collections["story_drafts"]
+    cleared = drafts_coll._docs[0]
+    assert cleared["hero_image_url"] == "gs://hero/sd/hero.png"
+    assert cleared["hometown_panel_url"] == "gs://hero/sd/hometown.png"
+    assert cleared["echo_panel_url"] == "gs://hero/sd/echo.png"

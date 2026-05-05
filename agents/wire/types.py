@@ -87,11 +87,28 @@ class NilLog:
     Fields mirror NilRedactionLog (TypedDict) but as a dataclass so the
     Layer can mutate / add internal fields without leaking them onto the
     Firestore document.
+
+    Day-7 full Layer fields (optional; default 0):
+      - rejected_short / rejected_no_word_boundary / rejected_no_context:
+        disambiguation pass counters.
+      - near_identifications: count of near-id sentences flagged at >=0.7
+        confidence (broadcast surface only; always 0 on wire).
+      - small_aggregates: count of small-aggregate patterns rewritten.
+      - flash_lite_unavailable: True if both Flash-Lite attempts errored
+        and the broadcast scan fell back to pass with a flag.
+      - return_reason: human-readable reason set when decision='return'.
     """
 
     direct_matches_redacted: int = 0
     aggregations_applied: int = 0
     needles_matched: list[str] = field(default_factory=list)
+    rejected_short: int = 0
+    rejected_no_word_boundary: int = 0
+    rejected_no_context: int = 0
+    near_identifications: int = 0
+    small_aggregates: int = 0
+    flash_lite_unavailable: bool = False
+    return_reason: str = ""
 
     def to_log_dict(self) -> NilRedactionLog:
         """Project to the public shape that ships on the WireEvent."""
@@ -103,9 +120,18 @@ class NilLog:
 
 @dataclass
 class WireScanResult:
-    """Output of NilRedactionLayer.scan_wire."""
+    """Output of NilRedactionLayer.scan_wire / scan_broadcast.
 
-    decision: Literal["pass", "aggregate", "redact"]
+    Decision values:
+      - 'pass'      : no individual references found; text unchanged.
+      - 'redact'    : direct match (post-disambiguation) rewritten in place.
+      - 'aggregate' : small-aggregate pattern replaced with a count phrase.
+      - 'return'    : near-identification or unresolvable; broadcast pipeline
+                      returns the draft to the Storyteller. Wire surface
+                      ALWAYS redacts and never returns.
+    """
+
+    decision: Literal["pass", "aggregate", "redact", "return"]
     redacted_message: str
     log: NilLog
 

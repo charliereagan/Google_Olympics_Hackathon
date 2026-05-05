@@ -79,6 +79,7 @@ class RuntimeState:
     narrator: Any = None
     publish_gate: Any = None
     nil_layer: Any = None
+    visualizer: Any = None  # Day-7: tool the Publish Gate calls (HOE-DEC-020).
     wire_emitter: Any = None
     pacer_factory: Callable[[float], Any] | None = None
     cost_counter: Any = None
@@ -316,9 +317,21 @@ def _build_storage_client() -> Any:
         return None
 
 
-def _bootstrap_nil_layer(bigquery_client: Any, env: dict[str, str]) -> Any:
-    """Run NilRedactionLayer.bootstrap. On RegistryTooSmallError, exit 1."""
-    from agents.publish_gate.nil_redaction_layer_stub import (
+def _bootstrap_nil_layer(
+    bigquery_client: Any,
+    env: dict[str, str],
+    *,
+    cost_counter: Any | None = None,
+) -> Any:
+    """Run NilRedactionLayer.bootstrap. On RegistryTooSmallError, exit 1.
+
+    Day-7: switched from `nil_redaction_layer_stub` to the full Layer at
+    `nil_redaction_layer`. Public API is identical (drop-in replacement);
+    the new Layer adds disambiguation + near-id + small-aggregate +
+    return-to-Storyteller. `cost_counter` is threaded through so the
+    near-id Flash-Lite calls land on the `gemini_flash_lite` axis.
+    """
+    from agents.publish_gate.nil_redaction_layer import (
         NilRedactionLayer,
         RegistryTooSmallError,
     )
@@ -333,6 +346,7 @@ def _bootstrap_nil_layer(bigquery_client: Any, env: dict[str, str]) -> Any:
             dataset=env["athlete_registry_dataset"],
             table=env["athlete_registry_table"],
             min_rows=min_rows,
+            cost_counter=cost_counter,
         )
     except RegistryTooSmallError:
         logger.exception("NIL Layer bootstrap failed (registry < min_rows)")
@@ -436,7 +450,9 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         logger.exception("wire_vocabulary load failed; agents will use free-text fallback")
         wire_vocabulary = None
 
-    # 6. NIL layer bootstrap (fail-closed)
+    # 6. NIL layer bootstrap (fail-closed). The full Day-7 Layer's near-id
+    # Flash-Lite check is cost-counted; we attach the CostCounter AFTER the
+    # counter is constructed in step 8 (late-binding hook).
     nil_layer = _bootstrap_nil_layer(bq_client, env)
 
     # 7. Wire emitter
@@ -446,6 +462,13 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
     # 8. Cost counter
     from agents.cost.counters import CostCounter
     cost_counter = CostCounter(bq_client, project_id=env["project"])
+    # Day-7: thread the cost counter into the full NIL Redaction Layer
+    # so its near-id Flash-Lite calls land on the `gemini_flash_lite` axis.
+    try:
+        if hasattr(nil_layer, "attach_cost_counter"):
+            nil_layer.attach_cost_counter(cost_counter)
+    except Exception:
+        logger.exception("nil_layer.attach_cost_counter failed; continuing")
     try:
         await cost_counter.recover_from_bigquery()
     except Exception:
@@ -531,10 +554,12 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         cost_counter=cost_counter,
         wire_vocabulary=wire_vocabulary,
     )
-    # Publish Gate (Day-6): seven-sub-stage governance gate. Mirrors the
-    # other agents' constructor shape — see agents/publish_gate/orchestrator.py.
-    # Invoked by the Editor's `dispatch_publish_gate` tool. The
-    # `_runtime_state` backref is set after RuntimeState construction below.
+    # Publish Gate (Day-6 + Day-7): seven-sub-stage governance gate.
+    # Mirrors the other agents' constructor shape — see
+    # agents/publish_gate/orchestrator.py. Day-7 adds the Visualizer
+    # tool (Nano Banana Pro / Gemini Flash Image) and the real Visual
+    # Review sub-stage. The `_runtime_state` backref is set after
+    # RuntimeState construction below.
     from agents.publish_gate import (
         FactCheckSubstage,
         LanguageReviewSubstage,
@@ -542,7 +567,14 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         PublishGateAgent,
         SafetyReviewSubstage,
         SourceReviewSubstage,
+        Visualizer,
         VisualReviewSubstage,
+    )
+    visualizer = Visualizer(
+        project=env["project"],
+        location=env["location"],
+        cost_counter=cost_counter,
+        storage=storage_client,
     )
     publish_gate = PublishGateAgent(
         prompt=prompts.get("publish_gate", ""),
@@ -559,7 +591,10 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
             cost_counter=cost_counter,
         ),
         language_review=LanguageReviewSubstage(),
-        visual_review=VisualReviewSubstage(),
+        visual_review=VisualReviewSubstage(
+            cost_counter=cost_counter,
+        ),
+        visualizer=visualizer,
         cost_counter=cost_counter,
         wire_vocabulary=wire_vocabulary,
     )
@@ -603,6 +638,7 @@ async def lifespan(app):  # pragma: no cover — Cloud Run boot path
         narrator=narrator,
         publish_gate=publish_gate,
         nil_layer=nil_layer,
+        visualizer=visualizer,
         wire_emitter=wire_emitter,
         cost_counter=cost_counter,
         firestore=fs_client,
