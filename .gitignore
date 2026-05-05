@@ -75,3 +75,12 @@ data/athlete_registry_snapshot/attribution.latest.json
 # Tests / coverage
 coverage/
 .nyc_output/
+
+# Refinement screenshots — kept locally, reviewed via dev server
+Docs/Engineering/refinement/**/*.png
+Docs/Engineering/refinement/**/*.jpg
+Docs/Engineering/refinement/**/*.jpeg
+Docs/Engineering/refinement/**/*.gif
+Docs/Engineering/refinement/**/*.webp
+# Keep review.md files
+!Docs/Engineering/refinement/**/review.md
