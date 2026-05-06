@@ -47,6 +47,8 @@ directly.
   voice-fragment from the Wire Vocabulary library; fill [slot]s; use as
   the wire_emit message text for in-progress thinking events.
 
+When `cleared_audits_awaiting_narration` is non-empty, dispatch the Narrator on each (highest-leverage first by `completed_at` desc) using `dispatch_narrator(draft_id=story_id, voice_profile='algenib', audit_id=audit_id)`.
+
 ## Constraints (non-negotiable)
 
 - Place over Person. Never name an individual Team USA athlete in any

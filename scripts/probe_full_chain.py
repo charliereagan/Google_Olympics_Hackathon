@@ -14,7 +14,7 @@ What it does
    `http://localhost:8080`; override via `--url`). Captures the
    `investigation_id` returned by the API.
 2. Polls Firestore every 30s for the four chain milestones:
-     - `lead_reports`           — first lead within 60s
+     - `lead_reports`           — first lead within 150s (override with --first-lead-budget)
      - `investigation_packets`  — first packet within 5min
      - `story_drafts`           — first draft within 7min
      - `publish_audits`         — first audit within 9min
@@ -81,7 +81,12 @@ DEFAULT_AUDIO_BUCKET = "storytellers-room-audio"
 
 # Polling cadence + per-stage budgets (seconds since POST).
 POLL_INTERVAL_S = 30
-TIMEOUT_LEAD_S = 60
+# First-lead budget bumped 60s -> 150s on Day 6: Pro deliberation in
+# `EditorAgent.think_once` actually takes ~100s end-to-end (system+user
+# context, grounded synthesis, tool call to ScoutDesk). 60s was too tight
+# and caused the probe to FAIL at the first stage even when the chain was
+# healthy. Override at the CLI with `--first-lead-budget`.
+TIMEOUT_LEAD_S = 150
 TIMEOUT_PACKET_S = 300
 TIMEOUT_DRAFT_S = 420
 TIMEOUT_AUDIT_S = 540
@@ -396,6 +401,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=1.0,
         help="compression factor for the synthetic investigation (default: 1.0)",
     )
+    p.add_argument(
+        "--first-lead-budget",
+        type=int,
+        default=TIMEOUT_LEAD_S,
+        help=(
+            "seconds to wait for the first lead_report to land "
+            f"(default: {TIMEOUT_LEAD_S}s; bumped Day-6 from 60s)"
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -445,9 +459,10 @@ async def _async_main(args: argparse.Namespace) -> int:
     stages: list[StageResult] = []
 
     timeout_total_s = int(args.timeout_min * 60)
+    first_lead_budget = int(getattr(args, "first_lead_budget", TIMEOUT_LEAD_S))
     # Cap each per-stage budget at the user-supplied total.
     per_stage = (
-        ("lead_reports", min(TIMEOUT_LEAD_S, timeout_total_s)),
+        ("lead_reports", min(first_lead_budget, timeout_total_s)),
         ("investigation_packets", min(TIMEOUT_PACKET_S, timeout_total_s)),
         ("story_drafts", min(TIMEOUT_DRAFT_S, timeout_total_s)),
         ("publish_audits", min(TIMEOUT_AUDIT_S, timeout_total_s)),

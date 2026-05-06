@@ -1,20 +1,27 @@
-// SSE bridge: Firestore `wire_events` -> Server-Sent Events.
+// SSE bridge: Firestore `wire_events` + `agent_handoffs` -> Server-Sent Events.
 //
 // Per HOE-DEC-024 the frontend does NOT speak to Firestore directly. This
 // Route Handler is the single bridge. It:
 //
-//   1. Pre-seeds the last 6 `replay`/`published` events on connect
-//      (BUILD_SPEC §6.9 — "the room is scrolling within <1s of arrival").
+//   1. Pre-seeds the last 6 `replay`/`published` wire events on connect
+//      (BUILD_SPEC §6.9 — "the room is scrolling within <1s of arrival"),
+//      plus the last 6 replay/published `agent_handoffs` for the agent-graph
+//      Floor (BUILD_SPEC §9.6).
 //   2. Attaches an Admin-SDK `onSnapshot` listener for `mode == 'live'`
-//      events and forwards each newly-added doc to the client.
-//   3. Emits a heartbeat comment every 15s to defeat idle proxy timeouts
+//      wire events and forwards each newly-added doc as `event: wire`.
+//   3. Attaches a SECOND `onSnapshot` listener for `mode == 'live'`
+//      `agent_handoffs` and forwards each newly-added doc as `event: handoff`
+//      (separate event type so the agent-graph Floor can subscribe
+//      independently of the Wire feed).
+//   4. Emits a heartbeat comment every 15s to defeat idle proxy timeouts
 //      (BUILD_SPEC §4 "How the SSE connection survives a 60-minute Cloud
 //      Run timeout"). Cloud Run's hard cap is 3600s; `maxDuration` matches.
-//   4. Honors `Last-Event-ID` on reconnect: resumes the live cursor after
-//      the last seen doc when present.
+//   5. Honors `Last-Event-ID` on reconnect: resumes the live cursor after
+//      the last seen doc when present (wire_events only — handoff events
+//      are append-only metadata; reconnect re-attaches to the live edge).
 //
-// Append-only: `wire_events` documents are never modified or removed; we
-// ignore those snapshot change types.
+// Append-only: both `wire_events` and `agent_handoffs` documents are never
+// modified or removed; we ignore those snapshot change types.
 //
 // Runtime is Node.js (NOT Edge) — the `@google-cloud/firestore` Admin SDK
 // uses gRPC and Node-only APIs.
@@ -34,6 +41,20 @@ const PRE_SEED_LIMIT = 6;    // Per BUILD_SPEC §6.9 — first-paint window.
 // rows (and pre-Day-7 over-redacted events) never hit the wire UI.
 const LIVE_WINDOW_MS = 60 * 60 * 1000;
 
+// Shape of an agent-handoff document. Mirrors `agents/handoffs.py::emit_handoff`.
+// Inline rather than importing because the agent-graph Floor frontend (which
+// will own the canonical TS type) ships in a later worker.
+type AgentHandoff = {
+  id: string;
+  from_agent: string;
+  to_agent: string;
+  tool_call_id: string;
+  story_unit_id: string | null;
+  investigation_id: string | null;
+  timestamp: string;
+  mode: 'live' | 'replay' | 'published';
+};
+
 export async function GET(req: NextRequest) {
   const db = getFirestore();
   const lastEventId = req.headers.get('last-event-id');
@@ -43,7 +64,8 @@ export async function GET(req: NextRequest) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
-      let unsubscribe: (() => void) | null = null;
+      let unsubscribeWire: (() => void) | null = null;
+      let unsubscribeHandoff: (() => void) | null = null;
       let heartbeat: ReturnType<typeof setInterval> | null = null;
 
       const enqueue = (chunk: string) => {
@@ -75,13 +97,21 @@ export async function GET(req: NextRequest) {
           clearInterval(heartbeat);
           heartbeat = null;
         }
-        if (unsubscribe) {
+        if (unsubscribeWire) {
           try {
-            unsubscribe();
+            unsubscribeWire();
           } catch {
             // best-effort
           }
-          unsubscribe = null;
+          unsubscribeWire = null;
+        }
+        if (unsubscribeHandoff) {
+          try {
+            unsubscribeHandoff();
+          } catch {
+            // best-effort
+          }
+          unsubscribeHandoff = null;
         }
         try {
           controller.close();
@@ -100,7 +130,7 @@ export async function GET(req: NextRequest) {
         enqueue(`: heartbeat ${Date.now()}\n\n`);
       }, HEARTBEAT_MS);
 
-      // -- 1. PRE-SEED: last 6 replay/published events (BUILD_SPEC §6.9) ---
+      // -- 1a. PRE-SEED: last 6 wire_events replay/published (BUILD_SPEC §6.9) ---
       try {
         const preSeedSnap = await db
           .collection('wire_events')
@@ -126,9 +156,34 @@ export async function GET(req: NextRequest) {
         send('preseed-error', { message: String(err) });
       }
 
+      // -- 1b. PRE-SEED: last 6 agent_handoffs replay/published (BUILD_SPEC §9.6) ---
+      try {
+        const handoffSeedSnap = await db
+          .collection('agent_handoffs')
+          .where('mode', 'in', ['replay', 'published'])
+          .orderBy('timestamp', 'desc')
+          .limit(PRE_SEED_LIMIT)
+          .get();
+
+        const handoffSeedDocs = handoffSeedSnap.docs.slice().reverse();
+        for (const doc of handoffSeedDocs) {
+          const data = doc.data();
+          if (!data) continue;
+          const handoff: AgentHandoff = {
+            id: doc.id,
+            ...(data as Omit<AgentHandoff, 'id'>),
+          };
+          send('handoff-preseed', handoff, doc.id);
+        }
+        send('handoff-preseed-end', { count: handoffSeedDocs.length });
+      } catch (err) {
+        // Pre-seed failure is non-fatal — the live stream can still attach.
+        send('handoff-preseed-error', { message: String(err) });
+      }
+
       if (closed) return;
 
-      // -- 2. LIVE STREAM: onSnapshot listener ----------------------------
+      // -- 2. LIVE STREAM: wire_events onSnapshot listener ---------------
       try {
         // Day-10 D7: clamp the live feed to events emitted in the last
         // hour. `timestamp` is stored as an ISO 8601 string by
@@ -157,7 +212,7 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        unsubscribe = liveQuery.onSnapshot(
+        unsubscribeWire = liveQuery.onSnapshot(
           (snap) => {
             for (const change of snap.docChanges()) {
               // Wire events are append-only; ignore modified / removed.
@@ -176,6 +231,41 @@ export async function GET(req: NextRequest) {
         );
       } catch (err) {
         send('error', { message: `live stream init: ${String(err)}` });
+      }
+
+      // -- 3. LIVE STREAM: agent_handoffs onSnapshot listener (BUILD_SPEC §9.6)
+      // Separate event type (`event: handoff`) so the agent-graph Floor can
+      // subscribe independently of the Wire feed via `useWireStream`. Same
+      // 1-hour live window; no `Last-Event-ID` resume (handoffs are
+      // best-effort metadata; the Floor re-attaches to the live edge on
+      // reconnect).
+      try {
+        const liveCutoff = new Date(Date.now() - LIVE_WINDOW_MS).toISOString();
+        const handoffQuery = db
+          .collection('agent_handoffs')
+          .where('mode', '==', 'live')
+          .where('timestamp', '>=', liveCutoff)
+          .orderBy('timestamp', 'asc');
+
+        unsubscribeHandoff = handoffQuery.onSnapshot(
+          (snap) => {
+            for (const change of snap.docChanges()) {
+              // Handoffs are append-only; ignore modified / removed.
+              if (change.type !== 'added') continue;
+              const handoff: AgentHandoff = {
+                id: change.doc.id,
+                ...(change.doc.data() as Omit<AgentHandoff, 'id'>),
+              };
+              send('handoff', handoff, change.doc.id);
+            }
+          },
+          (err) => {
+            send('handoff-error', { message: String(err) });
+            // Don't tear down — let the client decide via reconnect.
+          },
+        );
+      } catch (err) {
+        send('handoff-error', { message: `handoff stream init: ${String(err)}` });
       }
     },
 

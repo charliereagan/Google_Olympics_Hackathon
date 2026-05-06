@@ -45,6 +45,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from agents.handoffs import safe_emit_handoff
+
 logger = logging.getLogger(__name__)
 
 
@@ -387,7 +389,8 @@ def _make_request_equity_review(*, state_getter: Any, wire: Any):
             operational'}` so the Storyteller can keep working without
             crashing the Runner.
         """
-        equity_editor = _resolve_runtime_attr(state_getter(), "equity_editor")
+        state = state_getter()
+        equity_editor = _resolve_runtime_attr(state, "equity_editor")
         if equity_editor is None:
             logger.warning(
                 "storyteller.request_equity_review: equity_editor not initialized"
@@ -400,6 +403,14 @@ def _make_request_equity_review(*, state_getter: Any, wire: Any):
         logger.info(
             "storyteller.request_equity_review: dispatching draft_id=%s",
             draft_id,
+        )
+        # Agent-graph particle stream (BUILD_SPEC §9.6): the Storyteller
+        # is dispatching its draft to the Equity Editor for parity review.
+        await safe_emit_handoff(
+            _resolve_runtime_attr(state, "firestore"),
+            from_agent="storyteller",
+            to_agent="equity_editor",
+            tool_call_id="request_equity_review",
         )
         result = await equity_editor.review_draft(draft_id)
         # Make sure draft_id is on the return regardless of how the
@@ -440,7 +451,8 @@ def _make_request_publish_gate(*, state_getter: Any, wire: Any):
             returns `{decision: 'unknown', draft_id, error: 'agent not
             yet operational'}`.
         """
-        publish_gate = _resolve_runtime_attr(state_getter(), "publish_gate")
+        state = state_getter()
+        publish_gate = _resolve_runtime_attr(state, "publish_gate")
         if publish_gate is None:
             logger.warning(
                 "storyteller.request_publish_gate: publish_gate not initialized"
@@ -453,6 +465,15 @@ def _make_request_publish_gate(*, state_getter: Any, wire: Any):
         logger.info(
             "storyteller.request_publish_gate: dispatching draft_id=%s",
             draft_id,
+        )
+        # Agent-graph particle stream (BUILD_SPEC §9.6): the Storyteller
+        # is dispatching the equity-cleared draft to the Publish Gate's
+        # seven-substage audit.
+        await safe_emit_handoff(
+            _resolve_runtime_attr(state, "firestore"),
+            from_agent="storyteller",
+            to_agent="publish_gate",
+            tool_call_id="request_publish_gate",
         )
         result = await publish_gate.review(story_draft_id=draft_id)
         out = dict(result or {})

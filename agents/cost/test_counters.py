@@ -116,6 +116,77 @@ async def test_batched_flush_to_bigquery():
 
 
 @pytest.mark.asyncio
+async def test_daily_usd_ceiling_blocks_runaway_pro_spend():
+    """The USD daily-cap (HOE-DEC-033 Day-6 update) trips even when the
+    per-axis token cap has plenty of headroom.
+
+    With a $50/day limit at conservative-high Pro pricing
+    ($5/$20 per 1M in/out), 2,000,000 input tokens already implies
+    ~$10 of spend; we push to ~$51 and assert the third call raises.
+    """
+    bq = _FakeBQ()
+    counter = CostCounter(
+        bq,
+        project_id="p",
+        # Disable the per-axis cap so we know it's the USD guard that fires.
+        ceilings={"gemini_pro": 10**12},
+        flush_interval_seconds=10.0,
+        daily_usd_limit=50.0,
+        absolute_usd_limit=300.0,
+    )
+    # ~$25 in two calls (5M input @ $5/M = $25).
+    for _ in range(2):
+        await counter.increment(
+            agent="editor",
+            sub_agent=None,
+            axis="gemini_pro",
+            model="gemini-3.1-pro-preview",
+            input_tokens=2_500_000,
+            output_tokens=0,
+        )
+    # Below $50 -> still passes.
+    await counter.assert_under_ceiling(axis="gemini_pro", agent="editor")
+
+    # Push another ~$26 of input -> total ~$51, over the $50 ceiling.
+    await counter.increment(
+        agent="editor",
+        sub_agent=None,
+        axis="gemini_pro",
+        model="gemini-3.1-pro-preview",
+        input_tokens=5_200_000,
+        output_tokens=0,
+    )
+    with pytest.raises(CostCeilingExceeded):
+        await counter.assert_under_ceiling(axis="gemini_pro", agent="editor")
+
+
+@pytest.mark.asyncio
+async def test_usd_ceilings_read_env_vars(monkeypatch):
+    """`COST_CEILING_DAILY_USD` / `COST_CEILING_ABSOLUTE_USD` env vars
+    override the module defaults at construction time."""
+    monkeypatch.setenv("COST_CEILING_DAILY_USD", "5.0")
+    monkeypatch.setenv("COST_CEILING_ABSOLUTE_USD", "20.0")
+    bq = _FakeBQ()
+    counter = CostCounter(
+        bq,
+        project_id="p",
+        ceilings={"gemini_pro": 10**12},
+        flush_interval_seconds=10.0,
+    )
+    # 1.2M input tokens at $5/M -> $6 -> over the $5 daily cap.
+    await counter.increment(
+        agent="editor",
+        sub_agent=None,
+        axis="gemini_pro",
+        model="gemini-3.1-pro-preview",
+        input_tokens=1_200_000,
+        output_tokens=0,
+    )
+    with pytest.raises(CostCeilingExceeded):
+        await counter.assert_under_ceiling(axis="gemini_pro", agent="editor")
+
+
+@pytest.mark.asyncio
 async def test_recover_from_bigquery_on_boot():
     """Recovery seeds in-memory state from BigQuery."""
     bq = _FakeBQ()

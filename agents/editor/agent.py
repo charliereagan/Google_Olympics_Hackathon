@@ -28,6 +28,7 @@ from typing import Any
 
 from agents.cost.counters import CostCeilingExceeded
 from agents.editor.loop import autonomous_loop
+from agents.handoffs import safe_emit_handoff
 from agents.observability import log_agent_call, trace_span
 from agents.wire.emit import WireProxyNotReadyError
 from agents.wire.pacing import WirePacer
@@ -221,6 +222,13 @@ class EditorAgent:
                 "editor.dispatch_scout: scout=%s story_unit_id=%s",
                 scout_id, story_unit_id,
             )
+            await safe_emit_handoff(
+                firestore,
+                from_agent="editor",
+                to_agent="scout_desk",
+                tool_call_id="dispatch_scout",
+                story_unit_id=story_unit_id,
+            )
             return await scout_desk.dispatch_one(scout_id, story_unit_id)
 
         async def dispatch_storyteller(investigation_packet_id: str) -> dict:
@@ -258,12 +266,19 @@ class EditorAgent:
                 "editor.dispatch_storyteller: investigation_packet_id=%s",
                 investigation_packet_id,
             )
+            await safe_emit_handoff(
+                firestore,
+                from_agent="editor",
+                to_agent="storyteller",
+                tool_call_id="dispatch_storyteller",
+            )
             result = await storyteller.write_story(investigation_packet_id)
             return {"dispatched": True, **result}
 
         async def dispatch_narrator(
             story_draft_id: str,
             voice_profile: str = "broadcast",
+            audit_id: str | None = None,
         ) -> dict:
             """Dispatch the Narrator to render a cleared story draft to
             a NarrationManifest (BUILD_SPEC §5.6 + §7.6).
@@ -277,8 +292,17 @@ class EditorAgent:
                 story_draft_id: id of the cleared draft (the
                     `dispatch_storyteller` tool's return dict surfaces
                     this as `draft_id`).
-                voice_profile: 'broadcast' (default — the warm, paced
-                    Algenib voice) or 'wire' (the clipped Fenrir voice).
+                voice_profile: 'broadcast' / 'algenib' (default — the
+                    warm, paced Algenib voice per HOE-DEC-025) or
+                    'dispatcher' / 'fenrir' (the clipped Fenrir voice).
+                audit_id: optional id of the cleared `publish_audits`
+                    doc that authorized this narration. When provided,
+                    the Narrator carries the audit's NIL signature
+                    (claims_checked / softened / removed) into the
+                    `published_stories` doc, and the Editor stamps
+                    `narration_dispatched=True` on the audit so the
+                    next think cycle does not re-dispatch the same
+                    cleared audit.
 
             Returns:
                 `{dispatched, manifest?, error?}`. On failure (no
@@ -331,12 +355,34 @@ class EditorAgent:
                 "place_name_for_cues": draft.get("place_name", ""),
                 "era_reference_for_cues": draft.get("era_reference", ""),
             }
-            manifest = await narrator.narrate(
-                narration_input, voice_profile=voice_profile
+            # Per BUILD_SPEC §9.6 the agent-graph particle stream renders
+            # `storyteller -> narrator` here even though the Editor is the
+            # tool-call dispatcher (the story is moving from Storyteller's
+            # cleared draft to the Narrator's TTS rendering).
+            await safe_emit_handoff(
+                firestore,
+                from_agent="storyteller",
+                to_agent="narrator",
+                tool_call_id="dispatch_narrator",
+                story_unit_id=draft.get("story_unit_id"),
             )
+            # Translate prompt-level voice aliases ('algenib' / 'fenrir' per
+            # HOE-DEC-025) to the Narrator's API ('broadcast' / 'dispatcher').
+            resolved_voice = _resolve_voice_alias(voice_profile)
+            manifest = await narrator.narrate(
+                narration_input,
+                voice_profile=resolved_voice,
+                audit_id=audit_id,
+            )
+            # If the Editor was driven by a cleared `publish_audits` doc,
+            # mark it as narration_dispatched so the next think cycle's
+            # context snapshot doesn't re-surface it.
+            if audit_id:
+                await self._mark_audit_narration_dispatched(audit_id)
             return {
                 "dispatched": True,
                 "story_draft_id": story_draft_id,
+                "audit_id": audit_id,
                 "manifest": manifest,
             }
 
@@ -397,6 +443,12 @@ class EditorAgent:
                 }
             if scope == "feed":
                 logger.info("editor.request_equity_review: scope=feed")
+                await safe_emit_handoff(
+                    firestore,
+                    from_agent="editor",
+                    to_agent="equity_editor",
+                    tool_call_id="request_equity_review",
+                )
                 return await equity_editor.review_feed()
             if scope == "draft":
                 if not draft_id:
@@ -408,6 +460,12 @@ class EditorAgent:
                 logger.info(
                     "editor.request_equity_review: scope=draft draft_id=%s",
                     draft_id,
+                )
+                await safe_emit_handoff(
+                    firestore,
+                    from_agent="editor",
+                    to_agent="equity_editor",
+                    tool_call_id="request_equity_review",
                 )
                 return await equity_editor.review_draft(draft_id)
             return {
@@ -449,6 +507,12 @@ class EditorAgent:
                 }
             logger.info(
                 "editor.dispatch_investigator: lead_report_id=%s", lead_report_id
+            )
+            await safe_emit_handoff(
+                firestore,
+                from_agent="editor",
+                to_agent="investigator",
+                tool_call_id="dispatch_investigator",
             )
             result = await investigator.investigate(lead_report_id)
             # The investigator's investigate(...) returns either an
@@ -509,6 +573,15 @@ class EditorAgent:
                 }
             logger.info(
                 "editor.dispatch_publish_gate: story_draft_id=%s", story_draft_id
+            )
+            # Per BUILD_SPEC §9.6 the particle stream renders
+            # `storyteller -> publish_gate` here — the draft is moving
+            # from Storyteller to the Publish Gate's seven-substage audit.
+            await safe_emit_handoff(
+                firestore,
+                from_agent="storyteller",
+                to_agent="publish_gate",
+                tool_call_id="dispatch_publish_gate",
             )
             audit = await publish_gate.review(story_draft_id=story_draft_id)
             return {"dispatched": True, "audit": audit}
@@ -721,14 +794,20 @@ class EditorAgent:
             logger.exception("editor.think_once: failed to stamp last_think_cycle")
 
     async def _build_context_snapshot(self) -> dict:
-        """Read recent published feed + queue + cost dashboard.
+        """Read recent published feed + queue + cleared audits + cost.
 
         Compact (~1-2 KB) JSON for the Editor's user message. Per BUILD_SPEC
         §3.6 + plan §A.5, the Editor's prompt drives the decision; Python
         only assembles the snapshot.
+
+        The `cleared_audits_awaiting_narration` slot surfaces every
+        publish_audit doc with `final_decision=='cleared'` and
+        `narration_dispatched != True` so the model can dispatch the
+        Narrator on each (highest-leverage first by completed_at desc).
         """
         recent: list[dict] = []
         queue: list[dict] = []
+        cleared_awaiting: list[dict] = []
         try:
             recent = await self._read_recent_published()
         except Exception:
@@ -737,6 +816,12 @@ class EditorAgent:
             queue = await self._read_queue()
         except Exception:
             logger.exception("editor: read_queue failed; using empty list")
+        try:
+            cleared_awaiting = await self._read_cleared_audits_awaiting_narration()
+        except Exception:
+            logger.exception(
+                "editor: read_cleared_audits_awaiting_narration failed; using empty list"
+            )
 
         cost_today: dict[str, int] = {}
         if self._cost_counter is not None:
@@ -749,6 +834,7 @@ class EditorAgent:
         return {
             "recent_published": recent,
             "queue": queue,
+            "cleared_audits_awaiting_narration": cleared_awaiting,
             "cost_today": cost_today,
         }
 
@@ -827,6 +913,138 @@ class EditorAgent:
         except Exception:
             logger.exception("editor: read_queue: firestore query failed")
             return []
+
+    async def _read_cleared_audits_awaiting_narration(
+        self, *, limit: int = 5
+    ) -> list[dict]:
+        """Up to N cleared `publish_audits` docs with `narration_dispatched`
+        falsy, ordered by `completed_at` desc (highest-leverage first).
+
+        Surfaces in the context snapshot as `cleared_audits_awaiting_narration`
+        so the Pro model can dispatch the Narrator on each. Each dict is
+        the minimum the model needs to call dispatch_narrator:
+        `{audit_id, story_id, story_unit_id, completed_at}`.
+
+        Read-only and best-effort: any Firestore error returns an empty
+        list so the cycle proceeds to the rest of the snapshot.
+        """
+        if self._firestore is None or not hasattr(self._firestore, "collection"):
+            return []
+        try:
+            coll = self._firestore.collection("publish_audits")
+            try:
+                from google.cloud.firestore_v1 import FieldFilter  # type: ignore[import-untyped]
+                q = coll.where(
+                    filter=FieldFilter("final_decision", "==", "cleared")
+                ).where(
+                    filter=FieldFilter("narration_dispatched", "==", False)
+                )
+            except Exception:
+                # Older SDK / stub shape — chain the where() calls without
+                # FieldFilter. Stubs in tests pass-through everything; the
+                # `narration_dispatched != True` guard runs in Python below.
+                q = coll
+                if hasattr(coll, "where"):
+                    q = coll.where("final_decision", "==", "cleared").where(
+                        "narration_dispatched", "==", False
+                    )
+            if hasattr(q, "order_by"):
+                try:
+                    q = q.order_by("completed_at", direction="DESCENDING")
+                except TypeError:
+                    q = q.order_by("completed_at")
+            if hasattr(q, "limit"):
+                q = q.limit(limit)
+            out: list[dict] = []
+            stream = q.stream() if hasattr(q, "stream") else []
+            if hasattr(stream, "__aiter__"):
+                async for d in stream:
+                    summary = _summarize_audit_doc(d)
+                    if summary is not None:
+                        out.append(summary)
+            else:
+                for d in stream:
+                    summary = _summarize_audit_doc(d)
+                    if summary is not None:
+                        out.append(summary)
+            return out[:limit]
+        except Exception:
+            logger.exception(
+                "editor: read_cleared_audits_awaiting_narration: query failed"
+            )
+            return []
+
+    async def _mark_audit_narration_dispatched(self, audit_id: str) -> None:
+        """Stamp `narration_dispatched=True` on the cleared audit so the
+        next think cycle's context snapshot does not re-surface it.
+
+        Best-effort: any Firestore failure is logged but never raised
+        into the dispatch path (the manifest has already rendered).
+        """
+        if self._firestore is None or not hasattr(self._firestore, "collection"):
+            return
+        try:
+            coll = self._firestore.collection("publish_audits")
+        except Exception:
+            return
+        payload = {
+            "narration_dispatched": True,
+            "narration_dispatched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # Direct doc-id update first — but only if the doc already exists,
+        # otherwise FsDocRef.update() (and many production stubs) will
+        # create a phantom doc keyed off `audit_id` while the real audit
+        # lives under an auto-generated key (PublishGate writes via
+        # coll.add so doc id != audit_id).
+        if hasattr(coll, "document"):
+            try:
+                doc_ref = coll.document(audit_id)
+                snapshot = doc_ref.get() if hasattr(doc_ref, "get") else None
+                if asyncio.iscoroutine(snapshot) or hasattr(snapshot, "__await__"):
+                    snapshot = await snapshot
+                if snapshot is not None and getattr(snapshot, "exists", False):
+                    if hasattr(doc_ref, "update"):
+                        res = doc_ref.update(payload)
+                        if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                            await res
+                        return
+            except Exception:
+                logger.debug(
+                    "editor._mark_audit_narration_dispatched: doc_ref lookup failed; falling back to scan",
+                    exc_info=True,
+                )
+        # Fallback scan: PublishGate writes audits via coll.add(), so the
+        # doc id is auto-generated and the audit_id lives in a field.
+        try:
+            stream = coll.stream() if hasattr(coll, "stream") else []
+            target_doc_id = None
+            if hasattr(stream, "__aiter__"):
+                async for d in stream:
+                    data = _doc_to_dict(d)
+                    if data.get("audit_id") == audit_id or data.get("id") == audit_id:
+                        target_doc_id = getattr(d, "id", None) or data.get("id")
+                        break
+            else:
+                for d in stream:
+                    data = _doc_to_dict(d)
+                    if data.get("audit_id") == audit_id or data.get("id") == audit_id:
+                        target_doc_id = getattr(d, "id", None) or data.get("id")
+                        break
+            if target_doc_id and hasattr(coll, "document"):
+                try:
+                    doc_ref = coll.document(target_doc_id)
+                    if hasattr(doc_ref, "update"):
+                        res = doc_ref.update(payload)
+                        if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                            await res
+                except Exception:
+                    logger.exception(
+                        "editor._mark_audit_narration_dispatched: scan-resolved update failed"
+                    )
+        except Exception:
+            logger.exception(
+                "editor._mark_audit_narration_dispatched: scan failed"
+            )
 
     async def _read_story_draft(self, draft_id: str) -> dict | None:
         """Best-effort read of `/story_drafts/{draft_id}` from Firestore.
@@ -1215,19 +1433,40 @@ def _format_user_message(snapshot: dict) -> str:
     """
     recent = snapshot.get("recent_published", [])
     queue = snapshot.get("queue", [])
+    cleared_awaiting = snapshot.get("cleared_audits_awaiting_narration", [])
     cost = snapshot.get("cost_today", {})
     return (
         "## Recent published feed (last 10)\n"
         f"{json.dumps(recent, ensure_ascii=False)}\n\n"
         "## Active queue\n"
         f"{json.dumps(queue, ensure_ascii=False)}\n\n"
+        "## Cleared audits awaiting narration\n"
+        f"{json.dumps(cleared_awaiting, ensure_ascii=False)}\n\n"
         "## Cost dashboard (today, USD-equivalent axes)\n"
         f"{json.dumps(cost, ensure_ascii=False)}\n\n"
         "## What is your decision for this think-cycle?\n"
         "Choose one: dispatch a Scout, advance an investigation, accept an "
-        "Equity recommendation, or sleep. Keep your wire utterance terse "
-        "(8-15 words)."
+        "Equity recommendation, dispatch the Narrator on a cleared audit, "
+        "or sleep. Keep your wire utterance terse (8-15 words)."
     )
+
+
+def _resolve_voice_alias(voice_profile: str | None) -> str:
+    """Map prompt-level voice aliases to the Narrator's voice_profile API.
+
+    The Editor's prompt instructs the model to pass `'algenib'` (the warm
+    Broadcast voice per HOE-DEC-025); the Narrator's `narrate(...)`
+    accepts `'broadcast' | 'dispatcher'`. We translate at the dispatch
+    boundary so neither side has to know about the other's vocabulary.
+    """
+    if not isinstance(voice_profile, str):
+        return "broadcast"
+    v = voice_profile.strip().lower()
+    if v in {"algenib", "broadcast"}:
+        return "broadcast"
+    if v in {"fenrir", "dispatcher", "wire"}:
+        return "dispatcher"
+    return "broadcast"
 
 
 def _truncate_for_retry(message: str, max_chars: int = 1500) -> str:
@@ -1250,6 +1489,28 @@ def _summarize_wire_doc(doc: Any) -> dict:
         "story_unit_id": data.get("story_unit_id"),
         "agent": data.get("agent"),
         "message_type": data.get("message_type"),
+    }
+
+
+def _summarize_audit_doc(doc: Any) -> dict | None:
+    """Reduce a publish_audits doc to the fields the Editor cares about.
+
+    Returns None when the doc isn't a cleared+un-narrated audit (defensive
+    Python-side filter for stub clients that don't honor where()).
+    """
+    data = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
+    if not isinstance(data, dict):
+        return None
+    if data.get("final_decision") != "cleared":
+        return None
+    if data.get("narration_dispatched"):
+        return None
+    audit_id = data.get("audit_id") or data.get("id") or getattr(doc, "id", None)
+    return {
+        "audit_id": audit_id,
+        "story_id": data.get("story_id"),
+        "story_unit_id": data.get("story_unit_id"),
+        "completed_at": data.get("completed_at"),
     }
 
 

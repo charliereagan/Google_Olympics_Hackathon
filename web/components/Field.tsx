@@ -1,10 +1,11 @@
 'use client';
 
 /**
- * <Floor /> — editorial-celestial constellation of places. Day-9 lock:
- * a star field of PLACES, NOT a US map (Olympics are global). Canvas +
- * d3-force; gold-warm nodes, navy-light hairline edges, anchored hover
- * card, click-to-pin side panel with the verified-claims wire trail.
+ * <Field /> — editorial-celestial constellation surface (formerly /floor;
+ * VPS-DEC-038 freed the /floor slot for the BUILD_SPEC §9 agent graph).
+ * Day-9 lock: a star field of PLACES, NOT a US map (Olympics are global).
+ * Canvas + d3-force; gold-warm nodes, navy-light hairline edges, anchored
+ * hover card, click-to-pin side panel with the verified-claims wire trail.
  * Demo moment #3 (Equity Editor caused the anchor story) mocked via a
  * scripted agitos-red pulse on `INTERVENTION_NODE_ID`.
  *
@@ -19,10 +20,10 @@ import {
 } from 'd3-force';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  deriveEdges, deriveWireTrail, FLOOR_NODES,
+  deriveEdges, deriveWireTrail, FIELD_NODES,
   INTERVENTION_DELAY_MS, INTERVENTION_NODE_ID,
-  type FloorEdge, type FloorNode,
-} from '@/lib/floor-fixture';
+  type FieldEdge, type FieldNode,
+} from '@/lib/field-fixture';
 import { WireRow } from './WireRow';
 
 // Canvas needs raw rgba(); tokens mirror tailwind.config.ts §2.
@@ -43,7 +44,7 @@ const HND_DIM_ALPHA = 0.4;
 // + this many non-anchors = 5 labeled stars total per F5).
 const LABEL_TOP_NON_ANCHOR_COUNT = 2;
 
-interface SimNode extends FloorNode, SimulationNodeDatum {
+interface SimNode extends FieldNode, SimulationNodeDatum {
   /** Per-node mount stagger so the room "wakes up" rather than booting. */
   mountDelayMs: number;
   /** True for the 5 brightest stars (3 anchors + top-2 HND non-anchors). */
@@ -112,7 +113,7 @@ function useElementSize<T extends HTMLElement>(): [
   return [ref, size];
 }
 
-export function Floor() {
+export function Field() {
   const reduceMotion = useReducedMotion();
   const [containerRef, size] = useElementSize<HTMLDivElement>();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -123,14 +124,14 @@ export function Floor() {
     // The reveal tells a story: "Lake Placid, Chula Vista, Colorado Springs
     // anchor the room. The major hubs come into focus. And then the small
     // towns appear — the room finds rural places too."
-    const anchorIds = new Set(FLOOR_NODES.filter((n) => n.pin).map((n) => n.id));
-    const nonAnchorsByHndDesc = [...FLOOR_NODES]
+    const anchorIds = new Set(FIELD_NODES.filter((n) => n.pin).map((n) => n.id));
+    const nonAnchorsByHndDesc = [...FIELD_NODES]
       .filter((n) => !anchorIds.has(n.id))
       .sort((a, b) => b.hnd - a.hnd);
 
     // Pass-2 (F5): the 5 ambient labels = 3 anchors + 2 highest-HND non-anchors.
     const labelIds = new Set<string>([
-      ...FLOOR_NODES.filter((n) => n.pin).map((n) => n.id),
+      ...FIELD_NODES.filter((n) => n.pin).map((n) => n.id),
       ...nonAnchorsByHndDesc.slice(0, LABEL_TOP_NON_ANCHOR_COUNT).map((n) => n.id),
     ]);
 
@@ -142,7 +143,7 @@ export function Floor() {
     const nonAnchorCount = Math.max(1, nonAnchorsByHndDesc.length);
     const nonAnchorWindow = MOUNT_ANIM_MS - ANCHOR_PHASE_MS;
 
-    const nodes: SimNode[] = FLOOR_NODES.map((n, idx) => {
+    const nodes: SimNode[] = FIELD_NODES.map((n, idx) => {
       const isAnchor = !!n.pin;
       const mountDelayMs = isAnchor
         ? idx * 12 // existing behavior for the 3 anchors
@@ -154,7 +155,7 @@ export function Floor() {
         showLabel: labelIds.has(n.id),
       };
     });
-    const edges: FloorEdge[] = deriveEdges(FLOOR_NODES);
+    const edges: FieldEdge[] = deriveEdges(FIELD_NODES);
     const links: SimLink[] = edges.map((e) => ({ id: e.id, source: e.source, target: e.target }));
     return { simNodes: nodes, simLinks: links };
   }, []);
@@ -369,7 +370,7 @@ export function Floor() {
           aria-label="Constellation map of places that have produced Olympians and Paralympians"
         />
         {hoveredNode && hoveredNode.x !== undefined && hoveredNode.y !== undefined && (
-          <FloorNodeCard node={hoveredNode} x={hoveredNode.x} y={hoveredNode.y} />
+          <FieldNodeCard node={hoveredNode} x={hoveredNode.x} y={hoveredNode.y} />
         )}
       </div>
 
@@ -412,9 +413,9 @@ export function Floor() {
   );
 }
 
-interface FloorNodeCardProps { node: FloorNode; x: number; y: number }
+interface FieldNodeCardProps { node: FieldNode; x: number; y: number }
 
-function FloorNodeCard({ node, x, y }: FloorNodeCardProps) {
+function FieldNodeCard({ node, x, y }: FieldNodeCardProps) {
   const r = radiusForCount(node.olympians_paralympians_count);
   return (
     <motion.div
@@ -438,4 +439,4 @@ function FloorNodeCard({ node, x, y }: FloorNodeCardProps) {
   );
 }
 
-export default Floor;
+export default Field;

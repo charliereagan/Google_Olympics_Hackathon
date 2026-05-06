@@ -1,11 +1,12 @@
-// Floor fixture — synthetic constellation data for the editorial-celestial
-// Floor. PLACES, NOT a US map (Olympics are global). PROJECT_BRIEF §6 + §10
-// strict: no individual names, no times, no scoring results, no "former
-// Olympian" phrasing. Density rule: HND >= 3 only.
+// Field fixture — synthetic constellation data for the editorial-celestial
+// Field surface (formerly /floor; VPS-DEC-038 freed /floor for the
+// BUILD_SPEC §9 agent graph). PLACES, NOT a US map (Olympics are global).
+// PROJECT_BRIEF §6 + §10 strict: no individual names, no times, no scoring
+// results, no "former Olympian" phrasing. Density rule: HND >= 3 only.
 
 import type { WireEventProps } from '@/components/WireRow';
 
-export interface FloorNode {
+export interface FieldNode {
   id: string;
   place: string;
   region: string;
@@ -129,8 +130,8 @@ const ROWS: Row[] = [
   ['nashville-tn', 'Nashville, Tennessee', 'Tennessee', [PROGRAM.wbball, PROGRAM.arow], [PATTERN.parity], 4, 5.0, 2000, ['birmingham-al']],
 ];
 
-export const FLOOR_NODES: FloorNode[] = ROWS.map((r) => {
-  const node: FloorNode = {
+export const FIELD_NODES: FieldNode[] = ROWS.map((r) => {
+  const node: FieldNode = {
     id: r[0],
     place: r[1],
     region: r[2],
@@ -151,16 +152,16 @@ export const FLOOR_NODES: FloorNode[] = ROWS.map((r) => {
 // Edge derivation. Stable id per alphabetically-sorted endpoint pair.
 // ---------------------------------------------------------------------------
 
-export interface FloorEdge {
+export interface FieldEdge {
   id: string;
   source: string;
   target: string;
 }
 
-export function deriveEdges(nodes: FloorNode[]): FloorEdge[] {
+export function deriveEdges(nodes: FieldNode[]): FieldEdge[] {
   const ids = new Set(nodes.map((n) => n.id));
   const seen = new Set<string>();
-  const edges: FloorEdge[] = [];
+  const edges: FieldEdge[] = [];
   for (const node of nodes) {
     for (const otherId of node.edges_to) {
       if (!ids.has(otherId)) continue;
@@ -180,7 +181,7 @@ export function deriveEdges(nodes: FloorNode[]): FloorEdge[] {
 // no times, no scoring results. Voice signatures match agent prompts.
 // ---------------------------------------------------------------------------
 
-export function deriveWireTrail(node: FloorNode): WireEventProps[] {
+export function deriveWireTrail(node: FieldNode): WireEventProps[] {
   const program0 = node.programs[0] ?? 'a recurring program';
   const pattern0 = node.patterns[0] ?? 'a recurring pattern';
   return [
@@ -213,7 +214,7 @@ export function deriveWireTrail(node: FloorNode): WireEventProps[] {
       id: `${node.id}-trail-3`,
       timestamp: '2026-05-05T08:15:04Z',
       agent: 'equity_editor',
-      message: `Parity check on ${node.place}: the ${pattern0} pattern is documented on both Olympic and Paralympic sides. Cleared for the Floor.`,
+      message: `Parity check on ${node.place}: the ${pattern0} pattern is documented on both Olympic and Paralympic sides. Cleared for the Field.`,
       message_type: 'intervention',
       mode: 'replay',
     },

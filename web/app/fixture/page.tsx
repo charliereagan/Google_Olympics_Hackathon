@@ -7,7 +7,7 @@ import { Layout } from '@/components/Layout';
 
 const COLORS: Array<{ name: string; varName: string; hex: string; note: string }> = [
   { name: 'navy-deep', varName: '--navy-deep', hex: '#0A1428', note: 'page background, hero darken' },
-  { name: 'navy-mid', varName: '--navy-mid', hex: '#1A2740', note: 'panels, lower thirds, Floor node fill' },
+  { name: 'navy-mid', varName: '--navy-mid', hex: '#1A2740', note: 'panels, lower thirds, Field node fill' },
   { name: 'navy-light', varName: '--navy-light', hex: '#2C3E5A', note: 'hairline dividers, subtle borders' },
   { name: 'gold-warm', varName: '--gold-warm', hex: '#D4A84A', note: 'hairline rules, headlines, particles' },
   { name: 'gold-deep', varName: '--gold-deep', hex: '#A8842F', note: 'hover states, active sentence underline' },

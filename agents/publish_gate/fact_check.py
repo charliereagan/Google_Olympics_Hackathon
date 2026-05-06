@@ -373,6 +373,24 @@ class FactCheckSubstage:
         claims_removed = len(all_removed)
         claims_softened = len(model_softened)
 
+        # 0-claims pass-through (Day-6 fix). When the structured-extraction
+        # model returns an empty list of claims AND the regex pre-pass found
+        # nothing, the draft passes Fact Check trivially — there is nothing
+        # to verify, so there is nothing that can fail. Without this branch,
+        # narrative-prose drafts (heavy on voice, light on enumerable
+        # claims) churned the Storyteller's revision loop forever: 0 claims
+        # extracted -> revision -> 0 claims extracted -> revision -> kill.
+        # See HOE-DEC-033 cost-counter / FactCheck regressions, Day-6.
+        if claims_checked == 0 and claims_removed == 0 and claims_softened == 0:
+            return FactCheckResult(
+                claims_checked=0,
+                claims_removed=0,
+                claims_softened=0,
+                removed_claims=[],
+                softened_claims=[],
+                passed=True,
+            )
+
         passed = claims_removed == 0
 
         return FactCheckResult(

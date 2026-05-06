@@ -144,6 +144,7 @@ class NarratorAgent:
         *,
         voice_profile: VoiceProfile = "broadcast",
         ctx: Any | None = None,
+        audit_id: str | None = None,
     ) -> NarrationManifest:
         """Convert a Storyteller draft to a NarrationManifest.
 
@@ -151,6 +152,12 @@ class NarratorAgent:
         failure after retries, storage write failure) the method emits a Wire
         thinking event and returns a structured manifest reflecting the
         failure.
+
+        When `audit_id` is provided AND the manifest renders successfully
+        (non-fallback, audio_urls populated), the Narrator also writes
+        a `published_stories/{auto_id}` doc carrying the cleared draft
+        text + audio URL + audit-derived NIL signature so the Broadcast
+        page has a single read-target for the published story.
         """
         if os.environ.get("AGENT_RUNTIME_PAUSED") == "1":
             logger.debug("narrator.narrate: paused (AGENT_RUNTIME_PAUSED=1)")
@@ -322,6 +329,27 @@ class NarratorAgent:
         await self._safe_emit_milestone(
             milestone, investigation_id=investigation_id, story_unit_id=None
         )
+
+        # --- Persist `published_stories` doc (Day-6 last-mile wire) ---------
+        # The cleared draft + manifest are the canonical published story.
+        # The Broadcast page reads from `published_stories`. The Storyteller
+        # already passed the draft through equity + the Publish Gate cleared
+        # it, so we write the cleared text verbatim — no re-redaction here.
+        try:
+            await self._persist_published_story(
+                draft=draft,
+                manifest=manifest,
+                voice_profile=voice_profile,
+                audit_id=audit_id,
+            )
+        except Exception:
+            # Persistence is best-effort: a dropped published_stories doc
+            # is recoverable from publish_audits + the cleared draft, but
+            # the manifest the caller is about to consume is still valid.
+            logger.exception(
+                "narrator.narrate: persist_published_story failed for story_id=%s",
+                story_id,
+            )
 
         log_agent_call(
             agent="narrator",
@@ -717,6 +745,137 @@ class NarratorAgent:
             fallback_reason=reason,
         )
 
+    # -- Published story persistence ----------------------------------------
+
+    async def _persist_published_story(
+        self,
+        *,
+        draft: StoryDraftForNarration,
+        manifest: NarrationManifest,
+        voice_profile: VoiceProfile,
+        audit_id: str | None,
+    ) -> None:
+        """Write the cleared draft + manifest to `published_stories`.
+
+        Skipped silently when:
+          - firestore is unavailable (test stubs without `_firestore`)
+          - the manifest is a fallback (no audio rendered)
+          - the manifest has no audio URL (degenerate empty draft)
+
+        The Storyteller draft is already NIL-clean (the cleared
+        publish_audit said so); we copy it verbatim.
+        """
+        if self._firestore is None or not hasattr(self._firestore, "collection"):
+            return
+        if manifest.get("fallback") and not manifest.get("audio_urls"):
+            return
+        audio_urls = manifest.get("audio_urls") or []
+        if not audio_urls:
+            return
+
+        story_id = draft.get("story_id") or manifest.get("story_id") or ""
+        story_unit_id = draft.get("story_unit_id")
+        # NIL signature: pulled from the cleared publish_audit when an
+        # audit_id was threaded through. Best-effort — the audit may have
+        # been written by a stub coll.add() so direct doc-id lookups can
+        # miss; we fall back to a scan.
+        audit = await self._read_publish_audit(audit_id) if audit_id else None
+        nil_signature = _build_nil_signature(audit)
+
+        duration_ms = int(manifest.get("audio_duration_ms") or 0)
+        manifest_id = manifest.get("story_id") or story_id
+
+        published: dict[str, Any] = {
+            "story_id": story_id,
+            "story_unit_id": story_unit_id,
+            "kicker_place": draft.get("place_name_for_cues")
+            or draft.get("place_name"),
+            "headline": draft.get("headline", ""),
+            "dek": draft.get("dek", ""),
+            "body_paragraphs": _split_paragraphs(draft.get("body", "")),
+            "pull_quote": draft.get("pull_quote"),
+            "verified_claims": draft.get("verified_claims", []),
+            "narration": {
+                "voice_name": manifest.get("voice_name") or voice_profile,
+                "audio_url": audio_urls[0],
+                "audio_urls": list(audio_urls),
+                "duration_s": duration_ms // 1000,
+                "manifest_id": manifest_id,
+            },
+            "hero_image_url": draft.get("hero_image_url"),
+            "nil_signature": nil_signature,
+            "audit_id": audit_id,
+            "published_at": self._clock().isoformat(),
+            "mode": "published",
+        }
+
+        try:
+            coll = self._firestore.collection("published_stories")
+        except Exception:
+            return
+        try:
+            res = coll.add(published)
+            if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                await res
+        except Exception:
+            logger.exception(
+                "narrator._persist_published_story: write failed for story_id=%s",
+                story_id,
+            )
+
+    async def _read_publish_audit(self, audit_id: str) -> dict | None:
+        """Best-effort read of `/publish_audits/{audit_id}`. Returns None on
+        any failure path so `_persist_published_story` proceeds with an
+        empty NIL signature."""
+        if not audit_id:
+            return None
+        if self._firestore is None or not hasattr(self._firestore, "collection"):
+            return None
+        try:
+            coll = self._firestore.collection("publish_audits")
+        except Exception:
+            return None
+        # Direct doc-id lookup.
+        try:
+            if hasattr(coll, "document"):
+                doc_ref = coll.document(audit_id)
+                snapshot = doc_ref.get() if hasattr(doc_ref, "get") else None
+                if snapshot is not None:
+                    if asyncio.iscoroutine(snapshot) or hasattr(snapshot, "__await__"):
+                        snapshot = await snapshot
+                    if snapshot is not None and getattr(snapshot, "exists", False):
+                        data = (
+                            snapshot.to_dict() if hasattr(snapshot, "to_dict") else None
+                        )
+                        if data:
+                            return dict(data)
+        except Exception:
+            logger.debug(
+                "narrator._read_publish_audit: doc-id lookup failed; scanning",
+                exc_info=True,
+            )
+        # Fallback: scan for matching `audit_id` field (PublishGate writes
+        # via coll.add, so the doc id is auto-generated).
+        try:
+            stream = coll.stream() if hasattr(coll, "stream") else []
+            if hasattr(stream, "__aiter__"):
+                async for d in stream:
+                    data = d.to_dict() if hasattr(d, "to_dict") else (
+                        d if isinstance(d, dict) else {}
+                    )
+                    if data.get("audit_id") == audit_id or data.get("id") == audit_id:
+                        return dict(data)
+            else:
+                for d in stream:
+                    data = d.to_dict() if hasattr(d, "to_dict") else (
+                        d if isinstance(d, dict) else {}
+                    )
+                    if data.get("audit_id") == audit_id or data.get("id") == audit_id:
+                        return dict(data)
+        except Exception:
+            logger.exception("narrator._read_publish_audit: scan failed")
+        return None
+
     # -- Wire helpers --------------------------------------------------------
 
     async def _safe_emit_thinking(
@@ -800,6 +959,49 @@ def _strip_inline_tags(text: str) -> str:
     import re as _re
 
     return _re.sub(r"\[[^\[\]]*\]", "", text).strip()
+
+
+def _split_paragraphs(body: str) -> list[str]:
+    """Split a Storyteller body into paragraphs on blank lines.
+
+    The Storyteller separates paragraphs with `\n\n`; published_stories
+    consumers (the Broadcast page) want a list of paragraph strings, not
+    a single blob. Empty paragraphs are dropped.
+    """
+    if not isinstance(body, str) or not body.strip():
+        return []
+    return [p.strip() for p in body.split("\n\n") if p.strip()]
+
+
+def _build_nil_signature(audit: dict | None) -> dict:
+    """Pull the NIL signature off a cleared publish_audit doc.
+
+    The signature surfaces in `published_stories.nil_signature` so the
+    Broadcast page can render the audit drawer's "29 claims checked,
+    1 softened, 0 removed" line — proof of trust per Demo Moment 5.
+    """
+    if not isinstance(audit, dict):
+        return {
+            "claims_checked": 0,
+            "claims_softened": 0,
+            "claims_removed": 0,
+            "redactions": 0,
+            "aggregations": 0,
+        }
+    sub_stages = audit.get("sub_stages") or {}
+    fact_check = sub_stages.get("fact_check") or {}
+    nil_review = sub_stages.get("nil_redaction_review") or {}
+    removed_claims = fact_check.get("removed_claims") or []
+    return {
+        "claims_checked": int(fact_check.get("claims_checked") or 0),
+        "claims_softened": int(fact_check.get("claims_softened") or 0),
+        "claims_removed": (
+            len(removed_claims) if isinstance(removed_claims, list)
+            else int(fact_check.get("claims_removed") or 0)
+        ),
+        "redactions": int(nil_review.get("redacted") or 0),
+        "aggregations": int(nil_review.get("aggregated") or 0),
+    }
 
 
 def _upload_blob(bucket: Any, blob_name: str, data: bytes) -> None:

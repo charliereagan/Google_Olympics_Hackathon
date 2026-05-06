@@ -45,6 +45,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from agents.handoffs import safe_emit_handoff
 from agents.observability import log_agent_call, trace_span
 from agents.publish_gate.types import (
     FactCheckResult,
@@ -266,6 +267,19 @@ class PublishGateAgent:
                 f"returned at {first_failure} for revision",
                 investigation_id=investigation_id,
                 story_unit_id=story_unit_id,
+            )
+            # Agent-graph particle stream (BUILD_SPEC §9.6): the Publish
+            # Gate is handing the draft back to the Storyteller for
+            # revision. The 'cleared' / 'killed' branches do NOT emit a
+            # handoff — those terminate the chain (cleared -> Narrator
+            # via the Editor's dispatch_narrator; killed -> end).
+            await safe_emit_handoff(
+                self._firestore,
+                from_agent="publish_gate",
+                to_agent="storyteller",
+                tool_call_id="publish_gate_return",
+                story_unit_id=story_unit_id,
+                investigation_id=investigation_id,
             )
         else:  # killed
             await self._write_publish_audit(audit)
@@ -942,15 +956,23 @@ class PublishGateAgent:
         return {}
 
     async def _write_publish_audit(self, audit: PublishAudit) -> None:
-        """Write the audit doc to `/publish_audits/{auto_id}`. Best-effort."""
+        """Write the audit doc to `/publish_audits/{auto_id}`. Best-effort.
+
+        Cleared audits get an explicit `narration_dispatched: False` field so
+        the Editor's `where('narration_dispatched', '==', False)` filter can
+        find them (Firestore equality filters skip docs missing the field).
+        """
         if self._firestore is None or not hasattr(self._firestore, "collection"):
             return
         try:
             coll = self._firestore.collection("publish_audits")
         except Exception:
             return
+        payload = dict(audit)
+        if payload.get("final_decision") == "cleared":
+            payload.setdefault("narration_dispatched", False)
         try:
-            res = coll.add(dict(audit))
+            res = coll.add(payload)
             if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
                 await res
         except Exception:

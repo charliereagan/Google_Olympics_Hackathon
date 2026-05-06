@@ -36,6 +36,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from agents.handoffs import safe_emit_handoff
+
 logger = logging.getLogger(__name__)
 
 
@@ -442,6 +444,17 @@ def _make_intervene_feed_drift(*, firestore: Any | None, wire: Any):
             story_unit_id=suggested_priority_lift_story_unit_id,
         )
 
+        # Agent-graph particle stream (BUILD_SPEC §9.6): the Equity Editor
+        # is signalling drift to the Editor, which decides whether to
+        # accept via accept_equity_recommendation.
+        await safe_emit_handoff(
+            firestore,
+            from_agent="equity_editor",
+            to_agent="editor",
+            tool_call_id="intervene_feed_drift",
+            story_unit_id=suggested_priority_lift_story_unit_id,
+        )
+
         return {
             "intervention_id": intervention_id,
             "kind": "feed_drift",
@@ -492,6 +505,16 @@ def _make_return_draft(*, firestore: Any | None, wire: Any):
         await _safe_emit_intervention(
             wire,
             "Draft returned. Paralympic context for this place is shallow.",
+            story_unit_id=result.get("story_unit_id"),
+        )
+
+        # Agent-graph particle stream (BUILD_SPEC §9.6): the Equity Editor
+        # is handing the draft back to the Storyteller for revision.
+        await safe_emit_handoff(
+            firestore,
+            from_agent="equity_editor",
+            to_agent="storyteller",
+            tool_call_id="return_draft",
             story_unit_id=result.get("story_unit_id"),
         )
 
