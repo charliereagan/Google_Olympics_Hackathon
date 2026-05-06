@@ -1,0 +1,101 @@
+{
+  "editor": {
+    "agent": "editor",
+    "base_chars_per_second": 50.0,
+    "jitter": 0.15,
+    "mid_message_pause_chance": 0.05,
+    "pause_min_ms": 100,
+    "pause_max_ms": 250,
+    "arrival_style": "streamed"
+  },
+  "cinderella": {
+    "agent": "cinderella",
+    "base_chars_per_second": 25.0,
+    "jitter": 0.30,
+    "mid_message_pause_chance": 0.45,
+    "pause_min_ms": 150,
+    "pause_max_ms": 500,
+    "arrival_style": "streamed"
+  },
+  "comeback": {
+    "agent": "comeback",
+    "base_chars_per_second": 25.0,
+    "jitter": 0.20,
+    "mid_message_pause_chance": 0.30,
+    "pause_min_ms": 200,
+    "pause_max_ms": 500,
+    "arrival_style": "streamed"
+  },
+  "hometown": {
+    "agent": "hometown",
+    "base_chars_per_second": 25.0,
+    "jitter": 0.25,
+    "mid_message_pause_chance": 0.30,
+    "pause_min_ms": 150,
+    "pause_max_ms": 450,
+    "arrival_style": "streamed"
+  },
+  "echo": {
+    "agent": "echo",
+    "base_chars_per_second": 15.0,
+    "jitter": 0.40,
+    "mid_message_pause_chance": 0.55,
+    "pause_min_ms": 250,
+    "pause_max_ms": 600,
+    "arrival_style": "streamed"
+  },
+  "investigator": {
+    "agent": "investigator",
+    "base_chars_per_second": 35.0,
+    "jitter": 0.15,
+    "mid_message_pause_chance": 0.20,
+    "pause_min_ms": 150,
+    "pause_max_ms": 350,
+    "arrival_style": "streamed"
+  },
+  "equity_editor": {
+    "agent": "equity_editor",
+    "base_chars_per_second": 0.0,
+    "jitter": 0.0,
+    "mid_message_pause_chance": 0.0,
+    "pause_min_ms": 0,
+    "pause_max_ms": 0,
+    "arrival_style": "instant"
+  },
+  "storyteller": {
+    "agent": "storyteller",
+    "base_chars_per_second": 30.0,
+    "jitter": 0.20,
+    "mid_message_pause_chance": 0.25,
+    "pause_min_ms": 200,
+    "pause_max_ms": 500,
+    "arrival_style": "streamed"
+  },
+  "narrator": {
+    "agent": "narrator",
+    "base_chars_per_second": 22.0,
+    "jitter": 0.10,
+    "mid_message_pause_chance": 0.15,
+    "pause_min_ms": 200,
+    "pause_max_ms": 400,
+    "arrival_style": "streamed"
+  },
+  "publish_gate": {
+    "agent": "publish_gate",
+    "base_chars_per_second": 40.0,
+    "jitter": 0.10,
+    "mid_message_pause_chance": 0.05,
+    "pause_min_ms": 100,
+    "pause_max_ms": 250,
+    "arrival_style": "streamed"
+  },
+  "scout_desk": {
+    "agent": "scout_desk",
+    "base_chars_per_second": 28.0,
+    "jitter": 0.20,
+    "mid_message_pause_chance": 0.20,
+    "pause_min_ms": 150,
+    "pause_max_ms": 400,
+    "arrival_style": "streamed"
+  }
+}

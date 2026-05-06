@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens duplicated as CSS vars for non-Tailwind contexts (Web Audio, D3, etc.).
+   Source of truth: Docs/Engineering/design-system.md §2. */
+:root {
+  --navy-deep: #0a1428;
+  --navy-mid: #1a2740;
+  --navy-light: #2c3e5a;
+  --gold-warm: #d4a84a;
+  --gold-deep: #a8842f;
+  --cream: #f5efe0;
+  --parchment: #e8ddc4;
+  --agitos-red: #c8102e;
+  --slate-room: #5a6878;
+  --wire-text: #b8c4d6;
+  --wire-time: #7a8aa0;
+}
+
+html,
+body {
+  background: var(--navy-deep);
+  color: var(--cream);
+  min-height: 100vh;
+  /* Layered atmosphere per design-system.md §6.
+     Vignette is a radial gradient on body; film grain comes from the SVG
+     <GrainOverlay /> overlay in <Layout>. We avoid a binary grain.png so
+     the asset stays in version control as code. */
+  background-image: radial-gradient(
+    ellipse at center,
+    transparent 50%,
+    rgba(0, 0, 0, 0.15) 100%
+  );
+}
+
+/* Reduced motion respected per design-system.md §5.4 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Visible focus ring — 2px gold-warm, 4px offset per §9 a11y */
+*:focus-visible {
+  outline: 2px solid var(--gold-warm);
+  outline-offset: 4px;
+}
