@@ -113,15 +113,28 @@ The Storyteller's Room is an AI broadcast room that finds, verifies, and tells t
 
 ## 2. Current State (Overwrite Each Session)
 
-**Last updated:** 2026-05-02, HoE Session 1 (Stack validation pass)
+**Last updated:** 2026-05-06, Day 11 close-out (frontend complete; 5/5 demo moments landing at fixture quality)
 
 **Local repo state:**
 
 - Path: `/Users/charliereagan/projects/Google_Olympics_Hackathon`
-- Branch: `main` (or to be initialized — has not yet been confirmed by Charlie at the time of this writing; HoE Session 1 did not run a `git status`)
-- Commits: none yet (project documents are being staged before the first commit)
-- Tests: none yet (no source code)
-- Apache 2.0 license: **NOT YET CREATED.** This is Day 1 priority #1. See §7.
+- Branch: `main`
+- Commits ahead of origin: pre-doc-catchup state had 4 days (Days 8/9/10/11) of uncommitted work; this session staged it in 3 clean commits.
+- Tests: **296+ passing** (293 from Day 7 + 10 Equity Editor voice tests + 3 emit full-disambiguation tests; lint clean across all Python).
+- Apache 2.0 license: ✓ in `LICENSE`; CI gate `scripts/check_license.sh` clean.
+
+**Frontend state (Days 8-11, 2026-05-04 → 2026-05-06):**
+
+- Next.js 15 App Router + React 19 + Tailwind 3.4 + Framer Motion + d3/d3-force + `@microsoft/fetch-event-source`
+- 4 surfaces live at `localhost:3000`: `/` (Wire feed), `/floor` (constellation), `/story/[id]` (Broadcast — 3 fixture stories), `/publish-gate` (audit)
+- Mobile responsive across all 4 surfaces (sm/md/lg breakpoints)
+- 11 design tokens + 9 type-scale entries + `room` easing locked in `tailwind.config.ts`
+- Counter (`DaysToLA28.tsx`) — UTC-midnight day-diff, stable across day boundaries
+- `<WireRow />` (8 variants) is the canonical broadcast graphic with inline mono NIL badge
+- `<Floor />` (Pass-2 tuned) — D3-force on Canvas, 58 fixture nodes, 5 anchor labels (Lake Placid / Chula Vista / Colorado Springs / Park City / Houston), agitos-red intervention pulse wired to `birmingham-al`
+- `<BroadcastPage />` — slow-fade hero (compression-factor 0.25), drop-cap body, italic Lora pull-quote, hairline-only verified-claim ribbons, Publish Gate signature footer
+- 3 Broadcast stories shipped: Mount Pleasant (wrestling), Park City (alpine + freestyle), Birmingham (Paralympic-anchored, EE-converged) — each with stylized Nano Banana Pro hero + Algenib narration
+- SSE bridge `/api/wire/stream` time-windowed to last 1 hour (Day 11 D7) — pre-Day-7 stale rows are invisible to UI
 
 **Documents in the repo:**
 
@@ -130,20 +143,30 @@ The Storyteller's Room is an AI broadcast room that finds, verifies, and tells t
 | `CONSTITUTION.md` | repo root | v1.2 (Pivot A+ — Place over Person; Day-1 tightening pass) |
 | `PROJECT_BRIEF.md` | repo root | v1.1 (Pivot A+) |
 | `What_is_The_Storytellers_Room.md` | repo root | v1.1 (Pivot A+) |
-| `BUILD_SPEC.md` | `Docs/Engineering/BUILD_SPEC.md` | **v1.3 (Pivot A+ + Day-1 tightening + HoE Session 1 stack-validation pass — see Changelog at top of file)** |
-| `HOE-HANDOFF.md` | `Docs/Engineering/HOE-HANDOFF.md` | This document — Session 1 baseline |
+| `BUILD_SPEC.md` | `Docs/Engineering/BUILD_SPEC.md` | v1.3 (Pivot A+ + Day-1 tightening + Session 1 stack-validation) |
+| `design-system.md` | `Docs/Engineering/design-system.md` | v1.0 (Day 8 — 11 locked tokens + 9 type-scale + AI-slop kill list + refinement-loop convention) |
+| `HOE-HANDOFF.md` | `Docs/Engineering/HOE-HANDOFF.md` | This document — Day 11 close-out |
+| `tech_snapshot.md` | `Docs/Engineering/tech_snapshot.md` | Day 11 close-out (frontend state added) |
+
+**Refinement reviews on disk:**
+
+- `Docs/Engineering/refinement/day8-pass1-wire/review.md`
+- `Docs/Engineering/refinement/day8-pass2-wire/review.md`
+- `Docs/Engineering/refinement/day9-pass1-floor-and-stream/review.md`
+- `Docs/Engineering/refinement/day10-pass1-broadcast-and-trust/review.md`
+- `Docs/Engineering/refinement/day11-pass1-trust-and-anchor/review.md`
 
 **Production / deployment state:**
 
-- **No GCP project provisioned yet.**
-- **No Cloud Run services running.**
-- **No BigQuery tables deployed.**
-- **No Firestore database initialized.**
-- **No Vertex AI access verified.**
-- **No demo URL exists.**
-- **No code, no tests, no agents.**
-
-This is intentional. Days 0-1 are documents + spec hardening. Day 1 (next session) begins GCP provisioning + Apache 2.0 license + repo skeleton + the Day-1 hard gates from BUILD_SPEC §13.
+- **GCP project:** `predictive-fx-495200-j4` (provisioned Day 1)
+- **Cloud Run services:** **NOT YET DEPLOYED** — runtime + web both run locally only. **Day-12 priority.**
+- **Firestore:** `(default)` in `nam5`, READY. 2 composite indexes on `wire_events` (both `(mode, timestamp)` — one ASC/DESC and one ASC/ASC).
+- **BigQuery:** `storytellers_room` + `storytellers_room_dev` datasets, 14 tables, `athlete_registry` seeded with 11,188 rows.
+- **Cloud Storage:** 3 buckets created, currently used only for the runtime's TTS output uploads. Hero images for the 3 Broadcast stories live in `web/public/fixture/heroes/` (committed; not GCS yet).
+- **Vertex AI access:** verified, all Gemini 3 family models responding on `location='global'`.
+- **Demo URL:** `localhost:3000` only. **No public URL exists. Day-12 priority.**
+- **Live data in Firestore:** 65+ wire_events (10 from Day-11 EE seed + 55 from Days 4-10 organic operation). 27 of the older events are pre-Day-7-patch over-redacted; D7 1-hour windowing keeps them invisible to the UI.
+- **Demo assets in repo:** 3 hero PNGs (Mount Pleasant, Park City, Birmingham — Nano Banana Pro), 3 narration MP3s (Algenib, ~3 minutes each).
 
 **Architecture summary (target — not yet built; all v1.3 architectural pins reflected):**
 
@@ -392,7 +415,48 @@ Two of the technical subagents hit a permissions wall (WebSearch / WebFetch deni
 | HoE smoke test caught two more bugs the workers' sandboxes couldn't reproduce: (1) HOE-DEC-032: ADK `LlmAgent.instruction` parses `{slot}` patterns as session-state variables → `KeyError` at Runner invocation. Fixed by adding `_sanitize_for_adk` to `agents/prompts.py::load_prompts` (rewrites `{snake_case}` → `[snake_case]`). 10 unit tests added. (2) HOE-DEC-033: ScoutDesk's `dispatch_one` called `cost_counter.assert_under_ceiling(sub_agent=...)` but the method signature only accepted `agent=`. Fixed by adding the `sub_agent` filter; matches the existing key-shape. | (this commit) | N/A |
 | **End-to-end Day-3 close-out smoke test (live infra):** boot completed; `last_think_cycle` populated; `POST /api/investigate {prompt: "Find me a Team USA hometown story...", compression_factor: 1.0}` → HTTP 202; **Editor dispatched Cinderella + Hometown Scouts**; both produced Lead Reports persisted to Firestore (`program_penn_state_wrestling [cinderella] confidence=0.84`; `program_illinois_wheelchair_basketball [hometown] confidence=1.0`); Editor emitted decision-class Wire events to Firestore reflecting queue state (`Queue healthy. Monitoring wrestling and wheelchair basketball programs.`). NIL Redaction Layer caught place-name false-positives (`[redacted] State`, `[redacted]nitoring`) and persisted redacted text — the write-through proxy worked exactly as designed. False-positive disambiguation is Day-6/7 work (full Layer adds 50-char context-window check). | `35d9ba6` | ✓ live |
 
-### 2026-05-05 — Day 7 (Visualizer + full NIL Layer + e2e harness — backend complete)
+### 2026-05-06 — Day 11 (R1 NIL forward-path verified + EE anchor seed + Mount Pleasant assets + 2 new demo stories)
+
+| Change | Commit | Deployed |
+|---|---|---|
+| Three Day-11 workers fanned out in parallel: (1) R1 NIL over-redaction investigation + D7 SSE bridge time-window, (2) D3 Equity Editor anchor seed, (3) D4/D5 Mount Pleasant hero image + narration audio. All three landed clean. | (this session) | N/A |
+| **R1 root cause: stale rows only.** Forward path is correct — `agents/wire/emit.py:118` calls `nil_layer.scan_wire(...)` synchronously which routes to the full `_direct_match_and_disambiguate` pipeline. Day-7 patch landed `2026-05-05 15:24 UTC`; all 27 over-redacted rows in Firestore are pre-Day-7 timestamps (Worker probed). New file `tests/test_emit_full_disambiguation.py` (3 integration tests through real `WireEmitter.emit` with synthetic registry — Chula Vista clean, Lake Placid clean, distinctive name still redacts) — all passing. Forward path is now guarded against silent regression. | (this session) | N/A |
+| **D7 SSE bridge time-window.** `web/app/api/wire/stream/route.ts` — added `LIVE_WINDOW_MS = 60 * 60 * 1000` constant + `where('timestamp', '>=', liveCutoff)` clause on the live query. Pre-Day-7 stale rows are now invisible to the wire UI. Existing `(mode, timestamp)` composite index covers the new compound condition with no new index required. | (this session) | ✓ live |
+| **D3 Equity Editor anchor seed.** `scripts/seed_equity_editor_demo.py` (179 LOC, idempotent with `--purge`). Writes 10 wire events under `investigation_id=demo-equity-edit-001` covering the full Birmingham EE arc: Editor THINKING → Hometown sub-scout → Investigator → **Equity Editor INTERVENTION** ("Feed drift detected. Last 4 places Olympic-heavy. Promoting Paralympic-anchored lead next." — story_unit_id=`birmingham-al`, no-apology rule clean) → Editor DECISION (re-routing) → Investigator → Storyteller → Publish Gate → Editor MILESTONE. Every event routes through `wire.emit()`; NIL Layer ran on each (one earlier draft "Story published. Stack updated." was rewritten to "Published. Queue updated." after the Layer flagged "Story" + "Stack" as athlete surnames — proof the Layer is fail-closed). Floor's `INTERVENTION_NODE_ID = 'birmingham-al'` matches the seed; agitos-red intervention pulse fires on Birmingham at t+4.2s after Floor mount. | (this session) | ✓ live |
+| **D4/D5 Mount Pleasant production assets.** `scripts/generate_demo_hero.py` (173 LOC) and `scripts/generate_demo_narration.py` (286 LOC). Hero: `web/public/fixture/heroes/mount-pleasant.png` — Nano Banana Pro (`gemini-3-pro-image-preview`), 23.0s latency (well under 120s timeout), 1376×768, 1.97 MB. Painterly editorial illustration of an empty wrestling room interior — sun-bleached mat with painted circles, single high window with amber light shaft, jump rope on a nail, bench with stopwatch + leather straps. Zero people, zero faces, zero logos, not photorealistic. Narration: `web/public/fixture/narration-mount-pleasant.mp3` — Algenib via `gemini-3.1-flash-tts-preview`, 178.72s, 2.15 MB. 33-sentence concatenation with `[short pause]` / `[long pause]` tags via the same logic as `agents/narrator/agent.py::_apply_inline_tags`. `web/lib/story-fixture.ts` updated with `hero_image_url` field; `web/components/BroadcastPage.tsx` renders `<motion.img>` when truthy with the compression-factor 0.25 fade preserved. | (this session) | ✓ live |
+| **Two new Broadcast stories shipped: Park City + Birmingham.** Each with full BroadcastStory entry (kicker, headline, dek, body 350-450 words, pull-quote, 5-7 verified claims, Publish Gate signature), Nano Banana Pro hero, Algenib narration. Park City (`/story/fixture-park-city-utah`): _"A school day that ends at one in the afternoon."_ — alpine + freestyle skiing, 03:29 narration. Birmingham (`/story/fixture-birmingham-alabama`): _"A city remade for the rest of itself."_ — Paralympic-anchored, adaptive cycling + wheelchair rugby + paratriathlon at the Lakeshore Foundation, 03:33 narration. Auto-DQ scan (worker ran the actual `agents/publish_gate/language_review._scan_surface`): **0 flagged terms, 0 predictive constructions** across both stories. No specific athlete names anywhere — protagonists are *the campus*, *the program*, *the schedule*, *the town*. `/story` index page now reads as a real publication ("PUBLISHED STORIES" / "What the room has finished telling." / "Each page is the place — the program — the pattern. Never an individual."). Birmingham ties to the EE intervention seed — demo viewer cuts from `/` (Birmingham EE arc) to the published story and the convergence lands. | (this session) | ✓ live |
+| **End-to-end Day-11 verification (live infra at 1440×900):** all four routes captured visually with the seeded data: `/` shows Birmingham EE arc end-to-end (Editor THINKING → Hometown sub-scout → Investigator → red-framed EE INTERVENTION → Editor DECISION) with no `[redacted]` fragments; `/floor` constellation reads as observatory at 3am with 4-of-5 anchor labels visible; `/story/{mount-pleasant,park-city-utah,birmingham-alabama}` heroes all land with display-xl Playfair + italic Lora dek + narration audio; `/publish-gate` audit panel renders aggregate stats + recent decisions + Mount Pleasant disambiguation showcase. **Five of five demo moments now land at fixture quality.** | (this session) | ✓ live |
+| Day-11 Vertex AI spend ≈ **$0.85** (3 image-gen calls @ ~$0.05 each + ~10 minutes of Algenib TTS @ ~$0.20-0.30 per minute). Within $1 budget. | (this session) | ✓ |
+
+### 2026-05-05/06 — Day 10 (Floor Pass-2 + Broadcast page + Publish Gate trust panel — the room is alive)
+
+| Change | Commit | Deployed |
+|---|---|---|
+| Three Day-10 workers fanned out in parallel: Floor Pass-2 composition fix + 5 anchor labels + reverse mount-stagger; Broadcast page (`/story/[id]`); Publish Gate trust panel (`/publish-gate`). All three landed clean. Then HoE provisioned the missing Firestore composite index that lit up live SSE streaming on `/`. | (this session) | N/A |
+| **Floor Pass-2** (worker af4ff1d6a55612034): `web/components/Floor.tsx` 324 → 441 LOC (+117, under +120 budget). Replaced `forceCenter` with `forceX/Y(strength=0.02)` — soft pull. `forceManyBody.strength(-240)`. `forceCollide.radius(r+18)`. `forceLink.distance(100).strength(0.16)`. Pinned anchors rebalanced to a triangle: Lake Placid `(-0.05, -0.45)`, Chula Vista `(-0.55, 0.35)`, Colorado Springs `(0.55, 0.05)`. `MOUNT_ANIM_MS` 800 → 1500ms; anchors enter first 150ms, then non-anchors HND-DESCENDING (rural appears last — story-telling stagger). Two-pass halo rendering: radial gradient + filled disc. HND<5 nodes get 0.4 alpha multiplier (brightness contrast). 5 stars labeled in tracked-small-cap mono `gold-warm/0.6`: PARK CITY, LAKE PLACID, CHULA VISTA, COLORADO SPRINGS, HOUSTON. | (this session) | N/A |
+| **Broadcast page** (worker ad3fc207f63a3a118): 8 new files, 696 LOC total. `web/lib/story-fixture.ts` (87 LOC) — `BroadcastStory` type + Mount Pleasant fixture + `getFixtureStory()` + `ALL_FIXTURE_STORIES` index. `web/components/BroadcastPage.tsx` (216 LOC) — slow-fade hero (opacity 0→1 over 800ms + scale 1.05→1.00 over 2s, room cubic-bezier — compression-factor 0.25 interpretation per BUILD_SPEC §3.7 / §7.1), kicker/headline/dek stack with bottom-anchored darken gradient. `web/components/AudioBar.tsx` (151 LOC) — hand-drawn 22×22 SVG play/pause, 1px hairline progress track, mono `mm:ss / mm:ss`, narration·voice caption, graceful 404 degradation. `web/components/VerifiedClaims.tsx` (75 LOC) — hairline-only ribbon list, three-column grid (mono slug | body claim | mono source). `web/app/story/[id]/page.tsx` server route + `loading.tsx` + `not-found.tsx`. `web/app/story/page.tsx` — divide-y hairline list of all fixture stories. **Auto-DQ scan: zero athlete names**; every proper noun in body prose audited against `agents/publish_gate/language_review`. The wrestling-room paragraph ("The mats have been replaced. The lights have been replaced. The roof has been replaced twice. The room has not.") is the voice signature — documentary register, never sportscaster. | (this session) | ✓ live |
+| **Publish Gate trust panel** (worker ae85f87d04e134520): 5 new files, 556 LOC total. `web/lib/publish-gate-fixture.ts` (93 LOC). `web/components/PublishGatePanel.tsx` (203 LOC) — kicker "PUBLISH GATE · NIL REDACTION LAYER · AUDIT", display-md "What the room caught.", italic dek "Every claim, every redaction, every name disambiguated. The room shows its work.", aggregate stats strip (4 columns), recent decisions feed with status tokens (PASS gold-warm / REDACTED agitos-red / DISAMBIGUATED parchment / AGGREGATED / RETURNED). `web/components/DisambiguationTrace.tsx` (125 LOC) — Mount Pleasant marquee example with ambiguous span underlined gold-warm + four steps each with vertical hairline gold-warm rule (surface match → context vector → candidate ranking → resolution) + cleared sentence + footer (`athlete_registry: 11,188 entries · matcher: aho-corasick`). `[athlete:A]` / `[athlete:B]` placeholder tokens — never names a real person. `web/app/api/publish-gate/recent/route.ts` (122 LOC) — Route Handler that lifts recent `wire_events` into the `NilDecision` shape and supplements with two fixture rows for outcomes the persisted log can't carry (DISAMBIGUATED, RETURNED). Honest provenance label `live + fixture · mixed`. | (this session) | ✓ live |
+| **HoE infra: Firestore composite index `wire_events:(mode ASC, timestamp ASC)`.** Created via `gcloud firestore indexes composite create` to unblock the SSE live query (the existing `(mode ASC, timestamp DESC, __name__ ASC)` index didn't satisfy the `mode == 'live' && order by timestamp asc` shape used by `web/app/api/wire/stream/route.ts`). Index name `CICAgJiUpoMK`, state READY after ~5min build. | (this session) | ✓ READY |
+| **End-to-end Day-10 close-out (live infra):** dev server running on :3000; all 4 routes return 200; SSE bridge emits `event: preseed-end` then live `event: wire` rows from Firestore wire_events collection (55 events at this point, all with `mode='live'`). All 5 demo moments land at fixture quality. Three of the originally-flagged R1/D1-D7 polish items deferred to Day 11 (R1 NIL fix, D3 EE seed, D4/D5 hero+narration). | (this session) | ✓ live |
+
+### 2026-05-05 — Day 9 (live SSE wiring + The Floor constellation, Pass 1)
+
+| Change | Commit | Deployed |
+|---|---|---|
+| HoE design checkpoint completed before Day 9 work began (per CLAUDE.md feedback memory: pause before any new visual surface). Charlie locked the constellation aesthetic for Floor (editorial-celestial, NOT cartographic — place-as-a-star metaphor scales beyond US borders) and authorized parallel SSE-wiring + Floor build. | (this session) | N/A |
+| **Worker C — root `/` SSE wiring**: `web/components/WireFeed.tsx` (new) — client component that subscribes via `useWireStream()`, renders three states (empty / error / streaming), preserves bottom-pinned auto-scroll only when user is at bottom, zero-collapses inner WireRow mount-entry transition for `mode='replay'/'published'` rows via `<MotionConfig transition={{ duration: 0 }}>` so pre-seed history mounts settled while live arrivals keep the design-system §5 entry animation. `web/app/page.tsx` — replaced "The room is loading." placeholder with `<WireFeed />` inside `<Layout>`. Empty-state copy: `The room is quiet.` (italic Lora, centered). Error-state copy: `The line is down. Reconnecting…` with hairline gold-warm progress bar. | (this session) | ✓ live |
+| **Worker D — The Floor (`/floor`) Pass 1**: 3 new files, 580 LOC. `web/lib/floor-fixture.ts` (225 LOC) — synthetic catalog of 58 places (US town/region names) with programs/patterns/HND, plus `deriveEdges()` and `deriveWireTrail()` helpers, scripted `INTERVENTION_NODE_ID = 'birmingham-al'` for the demo-moment-#3 pulse. `web/components/Floor.tsx` (324 LOC) — Hi-DPI Canvas, d3-force simulation, per-node mount-stagger reveal, viewport-faded edges, gold halo via `shadowBlur=12`, hover/click hit-testing, anchored hover card, framer-motion right-side panel with `<WireRow />` trail, scripted agitos-red intervention pulse at t+4.2s. `web/app/floor/page.tsx` — server-component shell that mounts `<Floor />` inside the existing `<Layout />`. Dependencies installed: `d3 d3-force @types/d3 @types/d3-force` only. | (this session) | ✓ live |
+| **Day-9 Pass 1 issues observed and triaged:** (a) Floor composition unbalanced — upper-left tangle, lower-right empty (forceCenter dominating). Logged for Pass 2. (b) SSE bridge erroring with "query requires an index" — `wire_events:(mode, timestamp asc)` not yet provisioned (an existing composite index covered `desc` but not `asc`). Logged for HoE infra. | (this session) | N/A |
+
+### 2026-05-04/05 — Day 8 (design system + frontend foundation)
+
+| Change | Commit | Deployed |
+|---|---|---|
+| Pre-Day-8 design conversation and `Docs/Engineering/design-system.md` v1.0 ratified — 11 locked color tokens (navy-deep, navy-mid, navy-light, gold-warm, gold-deep, cream, parchment, agitos-red, slate-room, wire-text, wire-time), 9 type-scale entries, room cubic-bezier `(0.32, 0.72, 0, 1)`, AI-slop kill list (no Inter as display, no Space Grotesk, no purple gradients, no shadcn, no chat bubbles), refinement-loop convention §11 (boot dev server, screenshot at 1440×900 + 1920×1080, write `review.md` with `@charlie` tags, push to `refinement/` folder). | `e1a5c2f` | N/A |
+| **Day-8 Pass 1 — three parallel workers (frontend foundation):** Worker A — `web/tailwind.config.ts` with all 11 tokens + 9 type-scale entries + `room` easing; `web/app/layout.tsx` with 4 next/font/google variables (Playfair Display, Lora, Inter, JetBrains Mono — all `display: 'block'` for FOIT); body className `bg-navy-deep text-cream font-body antialiased`. Worker B — `web/components/WireRow.tsx` (~478 LOC), the canonical broadcast graphic with three-tier hierarchy (timestamp + agent name + caption tag in right gutter | hairline rule | body), 8 variants (editor, equity_editor with 2px agitos-red left edge + outer frame, sub_agent with 24px indent + tracked small caps, thinking with typewriter via RAF, milestone instant, intervention with 600ms pulse, decision with medium body weight), inline mono NIL badge `[NIL: Nr/Na]` after timestamp when redactions occurred. Worker C — `web/app/api/wire/stream/route.ts` (Next.js 15 Route Handler, `runtime='nodejs'`, `dynamic='force-dynamic'`, `maxDuration=3600`, 15s heartbeat, pre-seed last 6 events, live `onSnapshot` listener with Last-Event-ID resume); `web/lib/wire-stream-client.ts` `useWireStream()` hook using `@microsoft/fetch-event-source`. | (this session) | ✓ locally |
+| **Day-8 Pass 1 review** at `Docs/Engineering/refinement/day8-pass1-wire/review.md` — fixture pages render at 1440×900; type voice landed (display-xl "A small town builds a generation." reads exactly like the editorial promise); color discipline holds (no AI-slop convergence); broadcast graphic hierarchy works at fixture scale. Charlie answered the 7 open questions and authorized Pass 2. | (this session) | N/A |
+| **Day-8 Pass 2 — two parallel workers:** Worker A — counter off-by-3 fix (`web/components/DaysToLA28.tsx` — replaced `Math.floor` with UTC-midnight day-diff helper; counter is now stable 801 days all day; was drifting 801→800 mid-day). Equity Editor "no apology" voice locked: `prompts/equity_editor.md` got an explicit no-apology rule under Voice signature ("Never begin an utterance with `Sorry`, `I apologize`, `I'm sorry`, `My apologies`, `Apologies`, `Unfortunately`, `I regret`, `I hate to`."); `tests/test_equity_editor_voice.py` (10 cases, all passing) asserts the prompt does not instruct apology, the rule is present, and every Equity Editor message in `web/app/fixture/wire/page.tsx` is clean. Worker B — mobile responsive sweep across `/`, `/fixture`, `/fixture/wire` at sm/md/lg breakpoints; `<WireRow />` header flex-wraps caption tag below the left cluster on `<sm`; sub-agent indent steps `pl-4 sm:pl-5 md:pl-6` (16/20/24px); `display-xl/display-lg` samples step down to `display-md/display-lg` on mobile; container padding tightens. Tailwind responsive prefixes only — no new tokens, no new fonts, no color changes. | (this session) | ✓ locally |
+| **Day-8 Pass 2 review** at `Docs/Engineering/refinement/day8-pass2-wire/review.md`. Charlie verified visually at 1440×900 — counter shows 801, fixture pages render correctly at desktop, mobile classes confirmed in rendered HTML. | (this session) | N/A |
 
 | Change | Commit | Deployed |
 |---|---|---|
@@ -454,89 +518,49 @@ Two of the technical subagents hit a permissions wall (WebSearch / WebFetch deni
 
 ## 7. Active Priorities (Overwrite Each Session)
 
-**Last set:** 2026-05-02 (HoE Session 1 — Stack validation pass)
+**Last set:** 2026-05-06 (Day 11 close-out — frontend complete; 5/5 demo moments landing at fixture quality; doc + commit catch-up in progress this session)
 
-**Status boundary:** No code shipped. No GCP provisioned. All five project documents drafted and ready to commit. **BUILD_SPEC.md is now at v1.3** — all v1.2 ambiguities pinned, model IDs verified, operability sections added (§15-§22), 12 new measurable acceptance criteria. Day 1 priority is Apache 2.0 license + GCP project + Day-1 hard gates (`scripts/verify_models.py`, `scripts/list_tts_voices.py`) + repo skeleton + BigQuery schemas + athlete registry seed. Engineering work begins Day 2.
+**Status boundary:** Backend complete since Day 7. Frontend complete since Day 11 (4 surfaces — Wire / Floor / Broadcast / Publish Gate — all live at `localhost:3000`, all passing typecheck + lint). Three production-quality demo stories shipped (Mount Pleasant + Park City + Birmingham) with stylized Nano Banana Pro heroes + Algenib narration. Live SSE stream working with 1-hour time-window. Equity Editor anchor seed lights demo moment #3. **All five demo moments now land at fixture quality.**
 
-### What's proven:
+**What's left for submission (May 11, 5pm PT — internal target May 10 EOD):**
+
+1. **Demo recording** — 2-3 takes of cold-start → broadcast flow against the 4 surfaces. The narrative arc is locked: open on `/` (live wire activity, Birmingham EE arc visible) → cut to `/floor` (constellation reveals, anchor labels appear, Birmingham pulse fires) → cut to `/story/fixture-mount-pleasant` (or Birmingham, the EE-converged story) → cut to `/publish-gate` (audit + disambiguation showcase).
+2. **Cloud Run deploy** — agent-runtime + web. Currently `localhost:3000` only. Needs production URLs for the submission. Plan: agent-runtime `us-central1` Cloud Run (`--min-instances=1 --cpu-always-allocated --use-http2 --timeout=3600s` per BUILD_SPEC §3.7), web Cloud Run same region. Hero images + narration MP3s migrate from `web/public/fixture/` to Cloud Storage (already-provisioned `gs://storytellers-room-hero-images` + `gs://storytellers-room-audio`) and get served via signed URLs or via the web service.
+3. **Submission package** — README polish, screenshots, video, Devpost form. PROJECT_BRIEF §14 Pre-Submission Verification Checklist run end-to-end.
+4. **Apache 2.0 badge check on GitHub About sidebar** (auto-DQ trigger if missing).
+5. **Optional polish:** Floor Pass-3 (composition + z-index), navigation menu (4 small links), purge pre-Day-7 over-redacted Firestore rows for a clean baseline.
+
+**Doc + commit catch-up (this session):** Days 8/9/10/11 of work was uncommitted before this session began. Catch-up includes Day-11 review, HOE-HANDOFF Sections 2/6/7 refresh, tech_snapshot refresh, backlog refresh, and 3 staged commits.
+
+### What's proven (Days 1-11):
 
 | Area | Status |
 |---|---|
 | **Concept** | Pivot A+ (Place over Person) locked. Challenge 2 submission category locked. |
-| **Architecture** | Seven-agent cast locked. Tech stack locked with verified Vertex AI model IDs (HoE Session 1). NIL Redaction Layer specified as a Python module with three checks and three actions; Wire-level enforcement pinned as in-process write-through proxy; fail-closed assertion pinned. Visualizer file location and pipeline pinned. "4× compressed time" mechanism pinned. Always-on loop pinned. HND detection logic pinned. Server-side `onSnapshot → SSE` streaming pattern pinned. ADK `ParallelAgent` for Scouts. |
-| **Documents** | CONSTITUTION v1.2, PROJECT_BRIEF v1.1, What_is_The_Storytellers_Room v1.1, BUILD_SPEC **v1.3**, HOE-HANDOFF Session 1 baseline. |
-| **Operability spec** | Cost guardrails (§15), Observability (§16), Error handling (§17), Local dev (§18), Deployment + IAM (§19), Test strategy (§20), Demo-day SPOFs (§21), Post-submission ops + data destruction (§22). All new in v1.3. |
-| **Compliance posture** | NIL safety architectural (not content-review). Restricted terminology baked into Storyteller prompt + encouraged temporal phrasing list per VPS-DEC-033. Conditional phrasing required and enforced at Publish Gate Language Review sub-stage. No third-party logos other than Google Cloud. Place-as-subject in all generated images. |
-| **Demo storyboard** | 3-minute video plan locked (BUILD_SPEC §11). Five demo moments identified. Anchor story selected organically on Day 9 with Day 8 evening soft-rank backstop. Live URL hero CTA at `compression_factor=0.25`. |
+| **Backend** | Backend complete since Day 7. All 7 cast members alive end-to-end. Full NIL Redaction Layer with disambiguation pass + near-id check + small-aggregate detection. Visualizer + Visual Review (Pro vision check). Day-7 e2e harness covers Lead → Investigator → Storyteller → Equity → Publish Gate (7 sub-stages) → Narrator. 296+ tests passing. Lint clean. |
+| **Frontend** | Frontend complete since Day 11. 4 surfaces (`/`, `/floor`, `/story/[id]`, `/publish-gate`) all rendering at fixture quality with mobile responsive. 11 design tokens locked, 9 type-scale entries locked, AI-slop kill list survived (no Inter-as-display, no purple gradients, no shadcn). Three Broadcast stories shipped with Nano Banana Pro heroes + Algenib narration. |
+| **Live data** | SSE bridge live-streaming wire_events from Firestore (`mode='live'` + last-1-hour window). Birmingham EE intervention seed lights demo moment #3. NIL Layer over-redaction regression closed (forward path verified + 1-hour window keeps stale rows out of UI). Counter at 800/801 days to LA28 (UTC-midnight day-diff). |
+| **Compliance posture** | NIL safety architectural (not content-review). Restricted terminology baked into Storyteller prompt + encouraged temporal phrasing list. Equity Editor "no apology" rule locked + tested. Conditional phrasing required and enforced at Publish Gate Language Review. No third-party logos other than Google Cloud. Place-as-subject in all 3 generated heroes. Auto-DQ scan run via `agents/publish_gate/language_review` against all 3 stories — clean. |
+| **Demo storyboard** | 4-surface narrative arc locked: `/` (room is alive + EE arc) → `/floor` (constellation reveals, Birmingham pulse) → `/story/{fixture}` (Mount Pleasant or Birmingham anchor story) → `/publish-gate` (trust artifact). Five demo moments land at fixture quality. |
 
-### Next priorities (Day 1 — 2026-05-03):
+### Day-12+ priorities (last 5 days before submission):
 
-**1. Apache 2.0 license + GitHub repo setup (auto-DQ trigger if missed)**
-- Create `LICENSE` file in repo root with full Apache 2.0 text
-- Set the GitHub repository's License field to "Apache License 2.0"
-- Verify the license badge is visible on the public repo's About sidebar
-- Add license reference to the README's first paragraph
-- **Wire `scripts/check_license.sh` into pre-commit + GitHub Actions CI** (BUILD_SPEC §13 Day-1 gate)
-- 10-minute task. Do it before any other Day-1 work.
+**1. Cloud Run deploy** (BUILD_SPEC §3.7 / §19) — production URLs for both `agent-runtime` and `web`. Required for the public demo URL the submission form needs. Hero images + narration MP3s migrate from `web/public/fixture/` to Cloud Storage. Both services with `--min-instances=1 --cpu-always-allocated --use-http2 --timeout=3600s`.
 
-**2. GCP project + service enablement**
-- Create or repurpose a GCP project for The Storyteller's Room
-- Enable APIs: Vertex AI, BigQuery, Firestore (Native mode), Cloud Storage, Cloud Run, Cloud Logging, Cloud Monitoring, Secret Manager, Cloud Build, Cloud Scheduler
-- Set up billing alerts: $100 informational / $200 audit / $300 kill switch (BUILD_SPEC §15.2)
-- Service accounts created per BUILD_SPEC §19.1 (`agent-runtime@`, `web@`)
+**2. Demo video recording** (BUILD_SPEC §11) — 2-3 takes of the cold-start → broadcast flow. Warm both Cloud Run URLs 5-30 min before recording.
 
-**3. Day-1 hard gates (block all downstream work until green)**
-- **Model availability:** run `scripts/verify_models.py` to confirm all seven verified model IDs respond on `location='global'`. If any return 404, treat as P0 blocker.
-- **TTS voices:** run `scripts/list_tts_voices.py`; audition 4-6 candidates each for Broadcast Narrator + Wire Dispatcher; pin chosen voice strings into BUILD_SPEC §3.5 and §5.6.
-- **Apache 2.0 badge:** confirm visible on GitHub repo About sidebar.
+**3. Submission package** — README polish, hero screenshots, demo video upload, Devpost form. Run PROJECT_BRIEF §14 Pre-Submission Verification Checklist end-to-end.
 
-**4. Repo skeleton**
-- Folder structure per BUILD_SPEC §3.10:
-  - `/agents` (with `/agents/wire/emit.py`, `/agents/publish_gate/nil_redaction_layer.py`, `/agents/publish_gate/visualizer.py`, `/agents/scouts/hnd_detector.py`, etc.)
-  - `/web` (Next.js 15, with `/web/app/api/wire/stream/route.ts`, `/web/config/seed_prompt.ts`)
-  - `/data` (BigQuery schemas, seed scripts, `wire_vocabulary.json`, `streaming_profiles.json`, `fallback_heroes/`)
-  - `/audio` (TTS configs, sound design assets, `music_beds/LICENSES.md`)
-  - `/scripts` (verify_models.py, list_tts_voices.py, check_license.sh, lint_no_direct_wire_writes.py, dress_rehearsal.sh, teardown_team_usa_data.sh, check_devpost_updates.py)
-  - `/prompts` (versioned agent system prompts in markdown)
-  - `/Docs/Engineering` (BUILD_SPEC + HOE-HANDOFF)
-- README.md first paragraph references Apache 2.0 license
-- `.gitignore` for Python, Node, GCP credentials, env files
-- `cloudbuild.yaml` skeleton per BUILD_SPEC §19.4
-- Initial commit on `main`
+**4. Apache 2.0 badge check** — confirm visible on GitHub repo About sidebar (auto-DQ trigger).
 
-**5. BigQuery schemas deployed (per BUILD_SPEC §8)**
-- `candidates` (story unit pool)
-- `historical_athletes` (filtered Team USA only — strict scope)
-- `geography`, `championships` (placement counts only, NO finish times, NO scoring data)
-- `athlete_registry` (NIL Layer)
-- `agent_call_counters` (per-axis cost ceilings tracked here)
-- `agent_errors` (failure-mode logging per §17)
+**5. Optional polish** (do these only if Days 12-13 are fast):
+- Floor Pass-3 (charge `-280`, header z-index fix, optional ambient-particle "stardust")
+- Top-left navigation menu (4 small links — Wire / Floor / Stories / Publish Gate) so judges can tour the room without typing URLs
+- Purge pre-Day-7 over-redacted wire_events from Firestore for a clean baseline (1-line gcloud + python script)
 
-**6. Athlete registry seeded — fail-closed asserted**
-- Loader at `/data/load_athlete_registry.py` pulls from Olympedia public CSV scrapes (`KeithGalli/Olympics-Dataset`, `chanronnie/Olympics`) filtered NOC=USA + Wikidata SPARQL cross-reference + Team USA roster scrape
-- First names, last names, full names, known variants, Unicode-normalized
-- **Verify ≥500 rows; the runtime startup assertion will fail-closed otherwise** (HOE-DEC-019)
+**6. Day-15 (post-submission) ops** — §22 data destruction checklist. Run `scripts/teardown_team_usa_data.sh` on or after June 16, 2026.
 
-**7. Local dev loop wired (per BUILD_SPEC §18)**
-- Firestore emulator in Docker
-- `make dev` boots emulator + agent runtime + Next.js dev server
-- Hot reload on `/prompts/` edits
-
-### Day 2-7 priorities (per BUILD_SPEC §13 phasing):
-
-**Days 2-5:** Agent core. Editor (with always-on loop), Investigator (with Deep Research async wrapper), all 4 sub-scouts (wrapped in ADK `ParallelAgent`), Wire vocabulary + streaming profiles wired, candidate pool reads/writes, HND detector, Wire stream rendering with server-side `onSnapshot → SSE`, Wire pre-seed pattern. **Day 5: empirical Gemini TTS word-timing API check** — drives §7.6 sync implementation.
-
-**Days 6-7:** Integrity & production layer. Paralympic Equity Editor (with rehearsed demo intervention). Storyteller (with full forbidden-words + encouraged temporal phrasing). Publish Gate with all 7 sub-stages. **NIL Redaction Layer Python module + write-through proxy + fail-closed startup assertion + lint rule**. **Visualizer at `/agents/publish_gate/visualizer.py` + max-3-regenerations + fallback path**. Narrator with verified voice configs + NarrationManifest (audio chunks + word timings + cues). Music bed candidates sourced + license receipts.
-
-**Day 8:** Frontend ship. The Floor (D3 Canvas + particle pool + tool call cards). The Broadcast (curtain rise with AudioContext master clock + synchronized choreography + sentence highlighting + Hometown panel + Historical Echo panel + Evidence Drawer + reduced-motion + WebVTT captions). Live URL hero CTA at `compression_factor=0.25` + per-IP rate limit. **Day 8 EOD: anchor candidate soft-rank** (Charlie reviews top 3-5 per VPS-DEC-027).
-
-**Day 9:** Run-and-discover. System runs continuously. 15-25 organic stories produced. **Pre-cache hero images per anchor candidate to `/data/fallback_heroes/`**. Anchor story selected from organic discoveries. **Day-9 dress rehearsal harness `scripts/dress_rehearsal.sh`** runs all 12 v1.3 measurable acceptance criteria (§14.1). Music bed final pick. Devpost text description refined.
-
-**Day 10:** Demo video. Warm both Cloud Run URLs 5-30 min before recording. Record, edit, music, color, voiceover. Complete Pre-Submission Verification Checklist (PROJECT_BRIEF §14). **Submit by EOD.**
-
-**Day 11:** Buffer. Fix anything that breaks. Monitor hosted URL. Begin §22 post-submission ops checklist.
-
-### Do NOT do (additions for v1.3 in **bold**):
+### Do NOT do:
 
 - Do not write any code before the Apache 2.0 license is in the repo and the badge is visible on the About sidebar (HOE-DEC-010)
 - Do not name any individual Team USA athlete in user-facing output, ever, anywhere — including current, retired, and historical athletes (HOE-DEC-002, Constitution Law 4)
