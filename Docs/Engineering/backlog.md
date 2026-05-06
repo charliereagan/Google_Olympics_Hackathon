@@ -14,17 +14,43 @@ When the build spec is fully delivered, archive it to `Docs/Engineering/archive/
 
 ## Active
 
-### Day-12+ remaining for submission (May 11, 5pm PT — internal target May 10 EOD)
+### Day-7 immediate (post-foundation-proven)
 
-- [defer 2026-05-06] **Cloud Run deploy of agent-runtime + web.** Both currently localhost-only on `:3000`. Submission needs public URLs. Plan: agent-runtime `us-central1` with `--min-instances=1 --cpu-always-allocated --use-http2 --timeout=3600s` (BUILD_SPEC §3.7). Web service same flags. Migrate hero PNGs + narration MPSs from `web/public/fixture/` to `gs://storytellers-room-hero-images/` and `gs://storytellers-room-audio/`. Update `BroadcastStory.hero_image_url` + `narration.audio_url` to point to the GCS URLs (or signed URLs).
-- [defer 2026-05-06] **Demo video recording.** 2-3 takes, 3 minutes each. Narrative arc: `/` (live wire + Birmingham EE arc) → `/floor` (constellation reveal + Birmingham pulse) → `/story/fixture-mount-pleasant` or `/story/fixture-birmingham-alabama` (anchor story, EE-converged) → `/publish-gate` (trust artifact + disambiguation showcase). Warm both Cloud Run URLs 5-30 min before record.
-- [defer 2026-05-06] **Submission package.** README polish (link to design-system, refinement reviews, demo video, public URL). Hero screenshots at 1920×1080 of all 4 surfaces. Devpost form. Run `PROJECT_BRIEF §14` Pre-Submission Verification Checklist end-to-end.
+- [defer 2026-05-07] **Dedup bug — Editor wrote 2 published_stories docs for the same draft.** Race between `narration_dispatched=True` write and the next think cycle's scan. Fix via Firestore transaction in the dispatch flag write OR use `where('narration_dispatched', '==', False)` AND a `not_exists`-style guard. ~15 min worker. **Must fix before producing more bounded organic stories.**
+- [defer 2026-05-07] **Bounded organic run — produce 3-5 published_stories.** Per HOE-DEC-036. Restart runtime with `COST_CEILING_DAILY_USD=75` (a wall, not a target). Fire 4-6 distinct seed prompts across diverse story angles (winter sport, summer sport, paralympic-anchored, regional-hub, school-pipeline). Let chain produce. Stop when 3-5 distinct organic published_stories exist. End-state spend: ~$30-50.
+- [defer 2026-05-07] **Frontend reframe per VPS-DEC-041 / 042 / 043 / 044 / BUILD_SPEC §9.** New `/` (cinematic story-hero + ambient Wire + 3-card discovery + seed-prompt CTA + recent grid + bottom nav). New `/map` (D3-geo + TopoJSON, no third-party tiles). Story facets (sport / era / type, URL-driven). Agent-graph `/floor` (D3 force on Canvas + handoff particles consuming Worker D's SSE stream). Move existing root content to `/wire`. Optional `?` overlay (top-right, hover-revealed).
+
+### Day-8/9 remaining for submission (May 11, 5pm PT — internal target May 10 EOD)
+
+- [defer 2026-05-06] **Cloud Run deploy of agent-runtime + web.** Both currently localhost-only on `:3000`. Submission needs public URLs. Plan: agent-runtime `us-central1` with `--min-instances=1 --cpu-always-allocated --use-http2 --timeout=3600s` (BUILD_SPEC §3.7). Web service same flags. Migrate hero PNGs + narration MP3s from `web/public/fixture/` to `gs://storytellers-room-hero-images/` and `gs://storytellers-room-audio/`. Update `BroadcastStory.hero_image_url` + `narration.audio_url` to point to the GCS URLs (or signed URLs).
+- [defer 2026-05-07] **Pre-demo corpus refresh.** Per HOE-DEC-036. ~6-12 hour bounded run on Day 9 with the polished system. Produce a final crop of organic stories that become "what the room found" for the demo recording.
+- [defer 2026-05-06] **Demo video recording.** 2-3 takes, 3 minutes each. Narrative arc: front door → `/field` (constellation) → `/story/<organic anchor>` → `/publish-gate` (trust). VPS-DEC-035 establishing shot of front door at 0:05-0:10. VPS-DEC-037 GCP/AI-Studio PIP cutaway during agent-graph `/floor` segment. Warm Cloud Run URLs 5-30 min before record.
+- [defer 2026-05-06] **Submission package.** README polish, hero screenshots at 1920×1080 of all surfaces, Devpost form (VPS-DEC-036 fan-centric opener). Run `PROJECT_BRIEF §14` Pre-Submission Verification Checklist end-to-end.
 - [defer 2026-05-06] **Apache 2.0 badge check on GitHub About sidebar** (auto-DQ trigger if missing). Visibility flip to PUBLIC required before submission.
-- [defer 2026-05-06] **Floor Pass-3 polish (optional).** Charge tweak `-280` to disperse upper-left cluster. Header z-index: "THE FLOOR" header label clipped by canvas nodes — set header `z-20`, canvas `z-0`. Optional ambient particle/stardust layer for the "observatory" vibe.
-- [defer 2026-05-06] **Top-left navigation menu (optional).** 4 small links (Wire / Floor / Stories / Publish Gate) in tracked-small-cap mono so judges can tour without typing URLs. Editorial-restrained — no nav bar, no hover states beyond color shift.
-- [defer 2026-05-06] **Purge pre-Day-7 over-redacted wire_events.** 27 stale rows in Firestore are invisible to UI (D7 1-hour window) but still in the collection. One-line `gcloud firestore documents delete` script for clean baseline. Low priority — cosmetic only.
-- [defer 2026-05-06] **`/story` index sort order.** Worker hand-ordered the array (Mount Pleasant / Park City / Birmingham). Charlie OK'd. If we add more stories, replace with a `published_at`-desc sort in `web/app/story/page.tsx`.
-- [defer 2026-05-06] **Birmingham hero kicker visibility.** "ALABAMA" partially obscured by wheelchair-rugby chair's rim highlight. Charlie reviewed and approved as-is. Logged here for future reference.
+
+### Day-6 surfaced but not blocking
+
+- [defer 2026-05-07] **Wire vocabulary template-fill bug.** Many publish_gate "thinking" wire events show unfilled placeholders: `claim N of {m}: checking`, `nil redaction: 0 reviewed, 0 aggregated, {k} redacted`, `sub-stage 0 of 7 complete`. The vocabulary `fill()` function isn't getting variable bindings on some paths. Cosmetic for the Wire UI; the underlying decisions ARE correct. Audit the publish_gate's vocabulary call sites and either fix the bindings or stop using vocabulary for these mechanical events.
+- [defer 2026-05-07] **publish_gate decision contradictions in wire log.** Sequences like `publish decision: cleared` followed immediately by `returned at fact_check for revision` appear because vocabulary fragments are emitted as "thinking" events regardless of actual sub-stage state. Likely same root cause as the template-fill bug.
+- [defer 2026-05-07] **published_stories `verified_claims` field ends up empty.** The Storyteller's draft schema for verified_claims may not match what `_persist_published_story` reads. Inspect draft → published_story handoff in `agents/narrator/agent.py::_persist_published_story` and confirm field names align with `agents/storyteller/types.py`.
+- [defer 2026-05-07] **published_stories `story_unit_id` ends up `None`.** Same root cause — the Narrator pulls from the audit doc, which doesn't carry story_unit_id. Either the audit needs to include story_unit_id at orchestrator write time, or the Narrator pulls it from the draft.
+- [defer 2026-05-07] **published_stories `hero_image_url` ends up `None`.** Today's run hit the daily USD ceiling before any hero generation completed; fallback bucket is empty. Once continuous op runs cleanly + bounded budget headroom, real hero images will land.
+- [defer 2026-05-07] **Floor Pass-3 polish (optional).** Charge tweak `-280` to disperse upper-left cluster. Header z-index. Optional ambient particle/stardust layer for the "observatory" vibe.
+- [defer 2026-05-07] **`/story` index sort order.** Worker hand-ordered. If we add organic stories beyond the 3 fixtures, replace with a `published_at`-desc sort in `web/app/story/page.tsx`.
+- [defer 2026-05-06] **Purge pre-Day-7 over-redacted wire_events.** 27 stale rows still in Firestore. 1-hour window keeps them invisible to UI. Low-priority cosmetic only.
+- [defer 2026-05-06] **Birmingham hero kicker visibility.** "ALABAMA" partially obscured by wheelchair-rugby chair's rim highlight. Charlie approved as-is.
+
+### Day-6 closed (this session)
+
+- ~~[defer 2026-05-06] **Local probe — chain end-to-end verification.**~~ **CLOSED 2026-05-07.** First-ever organic published_story landed. Chain proven through all 7 agents with real Pro deliberation, real fact_check (29 claims), real Equity Editor clearance, real Narrator audio.
+- ~~[defer 2026-05-06] **fact_check 0-claims rejection loop.**~~ **CLOSED 2026-05-07.** Worker A explicit short-circuit + 2 regression tests.
+- ~~[defer 2026-05-06] **Cost ceiling per-axis bottleneck.**~~ **CLOSED 2026-05-07.** Worker A USD ceilings + HoE per-axis bump (gemini_pro 200K→5M) + env overrides for all 4 axes (HOE-DEC-034).
+- ~~[defer 2026-05-06] **Vertex AI service-agent IAM on GCS buckets.**~~ **CLOSED 2026-05-07.** Granted `storage.objectViewer` to `service-615585524733@gcp-sa-aiplatform`.
+- ~~[defer 2026-05-06] **Probe `--first-lead-budget` 60s too tight for Pro deliberation.**~~ **CLOSED 2026-05-07.** Default bumped to 150s + new CLI flag.
+- ~~[defer 2026-05-06] **Cleared-audit → Narrator dispatch → published_stories.**~~ **CLOSED 2026-05-07.** Worker E + HoE inline `narration_dispatched: False` orchestrator fix (HOE-DEC-035) + composite index provisioned.
+- ~~[defer 2026-05-06] **`/floor` rename → `/field` (VPS-DEC-038).**~~ **CLOSED 2026-05-07.** Worker B.
+- ~~[defer 2026-05-06] **Broadcast autoplay-with-mute (VPS-DEC-044).**~~ **CLOSED 2026-05-07.** Worker C.
+- ~~[defer 2026-05-06] **SSE handoff-event backend (R4 / BUILD_SPEC §9.6).**~~ **CLOSED 2026-05-07.** Worker D + composite index provisioned.
 
 ### Day-11 surfaced from Day-10 close-out
 
