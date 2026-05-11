@@ -14,6 +14,7 @@ tool fires against the real fake Firestore + a mocked Narrator.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 from unittest import mock
@@ -25,6 +26,7 @@ from agents.wire.types import InvestigationContext
 from tests.integration._chain_stubs import (
     FsClient,
     PlanCycle,
+    invoke_bound_tool,
     make_adk_runner_stub,
 )
 
@@ -167,8 +169,10 @@ async def test_editor_context_snapshot_filters_already_narrated_audits():
 @pytest.mark.asyncio
 async def test_editor_dispatch_narrator_marks_audit_narration_dispatched():
     """When the Pro model calls `dispatch_narrator(audit_id=...)`, the
-    Editor's bound tool routes through the Narrator AND stamps
-    `narration_dispatched=True` on the audit doc.
+    Editor's bound tool atomically claims the audit BEFORE invoking the
+    Narrator (Day-6 dedup fix). A second concurrent dispatch on the
+    same audit returns `status='already_dispatched'` without calling
+    `narrator.narrate()` a second time.
 
     Drives the bound tool through the same `make_adk_runner_stub` that
     the integration suite uses — so this exercises the real wiring,
@@ -232,19 +236,125 @@ async def test_editor_dispatch_narrator_marks_audit_narration_dispatched():
     assert call["args"]["voice_profile"] == "algenib"
     assert call["args"]["audit_id"] == "aud-001"
 
-    # The Narrator was actually awaited by the bound tool.
+    # The Narrator was actually awaited by the bound tool, exactly once.
     narrator.narrate.assert_awaited_once()
     awaited = narrator.narrate.await_args
     # 'algenib' alias resolved to 'broadcast' at the dispatch boundary.
     assert awaited.kwargs.get("voice_profile") == "broadcast"
     assert awaited.kwargs.get("audit_id") == "aud-001"
 
-    # The audit is now flagged narration_dispatched=True so the NEXT
-    # cycle's snapshot will not re-surface it.
+    # The audit is now flagged narration_dispatched=True (set at claim
+    # time, BEFORE narrator.narrate() ran) so the NEXT cycle's snapshot
+    # will not re-surface it.
     audit_doc = fs.collection("publish_audits")._by_id
     audit_data = next(iter(audit_doc.values()))
     assert audit_data["narration_dispatched"] is True
     assert audit_data.get("narration_dispatched_at")
+    # The claim helper stamps the source so debugging the dedup race is
+    # easier in production logs.
+    assert audit_data.get("narration_dispatched_via") == "editor.dispatch_narrator"
+
+    # A SECOND dispatch attempt on the same audit (simulating the Day-6
+    # race where two think cycles overlap) must return cleanly without
+    # invoking the Narrator a second time.
+    second = await invoke_bound_tool(
+        editor,
+        "dispatch_narrator",
+        story_draft_id="draft-001",
+        voice_profile="algenib",
+        audit_id="aud-001",
+    )
+    assert second["status"] == "already_dispatched"
+    assert second.get("dispatched") is False
+    # Still exactly one narrate() call across both dispatch attempts.
+    assert narrator.narrate.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_narrator_claim_is_atomic_under_concurrent_calls():
+    """Two concurrent dispatch_narrator calls on the same audit_id (via
+    `asyncio.gather`) must result in EXACTLY ONE Narrator invocation —
+    the other call returns `status='already_dispatched'`. This is the
+    direct regression for the Day-6 evening dedup bug where two think
+    cycles overlapped on the long TTS call and produced two
+    `published_stories` docs for the same draft.
+    """
+    fs = FsClient()
+    _seed_cleared_audit(fs, audit_id="aud-race", story_id="draft-race")
+    _seed_cleared_draft(fs, story_id="draft-race")
+
+    narrator = mock.Mock()
+    narrator.narrate = mock.AsyncMock(
+        return_value={
+            "story_id": "draft-race",
+            "audio_urls": ["gs://bucket/draft-race/0.wav"],
+            "audio_duration_ms": 9000,
+            "voice_name": "Algenib",
+            "fallback": False,
+        }
+    )
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=fs,
+        model_id="gemini-3.1-pro-preview",
+        narrator=narrator,
+    )
+
+    args = {
+        "story_draft_id": "draft-race",
+        "voice_profile": "algenib",
+        "audit_id": "aud-race",
+    }
+    a, b = await asyncio.gather(
+        invoke_bound_tool(editor, "dispatch_narrator", **args),
+        invoke_bound_tool(editor, "dispatch_narrator", **args),
+    )
+
+    statuses = sorted(
+        [
+            ("dispatched" if r.get("dispatched") else r.get("status", "unknown"))
+            for r in (a, b)
+        ]
+    )
+    assert statuses == ["already_dispatched", "dispatched"]
+    # Exactly one narrator invocation across both concurrent dispatches.
+    assert narrator.narrate.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_narrator_handles_missing_audit():
+    """When `audit_id` references a doc that does not exist, the claim
+    returns False and the tool returns `status='already_dispatched'`
+    without invoking the Narrator. (Treating "no such audit" the same
+    as "already claimed" is intentional — both mean: do nothing.)
+    """
+    fs = FsClient()
+    _seed_cleared_draft(fs, story_id="draft-orphan")
+
+    narrator = mock.Mock()
+    narrator.narrate = mock.AsyncMock()
+
+    editor = EditorAgent(
+        prompt="You are the Editor.",
+        wire=_FakeWire(),
+        scout_desk=mock.Mock(),
+        firestore=fs,
+        model_id="gemini-3.1-pro-preview",
+        narrator=narrator,
+    )
+
+    result = await invoke_bound_tool(
+        editor,
+        "dispatch_narrator",
+        story_draft_id="draft-orphan",
+        voice_profile="algenib",
+        audit_id="aud-does-not-exist",
+    )
+    assert result["status"] == "already_dispatched"
+    narrator.narrate.assert_not_awaited()
 
 
 def test_resolve_voice_alias_maps_algenib_to_broadcast():

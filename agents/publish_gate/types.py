@@ -81,11 +81,21 @@ class LanguageReviewResult(TypedDict, total=False):
     """Sub-stage 6 — Language Review (BUILD_SPEC §5.7 + §8.6, PROJECT_BRIEF §10/§11).
 
     Pure-Python regex check. NO LLM call. Constitution Law 5 lives here.
+
+    Per VPS-DEC-053, predictive-frame constructions (PROJECT_BRIEF §11)
+    are FORBIDDEN, not "soften to." When detected, language_review returns
+    `passed=False` with `predictive_violations` naming the offending
+    constructions verbatim — the orchestrator returns the draft to the
+    Storyteller for revision. (`predictive_phrases_softened` is preserved
+    as a deprecated count field for backward compatibility with existing
+    audits.)
     """
 
     restricted_terms_flagged: int
     flagged_terms: list[str]
-    predictive_phrases_softened: int
+    predictive_phrases_softened: int     # legacy count, preserved for audit parity
+    predictive_violations: list[str]     # offending constructions verbatim (VPS-DEC-053)
+    predictive_reasons: list[str]        # 1-line reason per violation
     passed: bool
 
 
@@ -150,9 +160,16 @@ class PublishAudit(TypedDict, total=False):
 
     audit_id: str
     story_id: str
+    story_unit_id: str               # propagated from the draft so the Narrator + Broadcast surfaces have a single search key
     investigation_packet_id: str
     sub_stages: dict
     final_decision: Literal["cleared", "returned", "killed"]
     completed_at: str
     revisions_requested: list[str]   # which sub-stages requested revisions
     kill_reason: str                 # set when final_decision == 'killed'
+    # Per VPS-DEC-053: counts the number of times this draft was returned
+    # to the Storyteller specifically by the language_review sub-stage
+    # during the revision loop. Surfaces in the audit so reviewers can
+    # see when the Layer caught and returned a draft for revision (vs.
+    # silently softening, which was the Day-6 Tucson failure mode).
+    language_violations_returned_to_storyteller: int

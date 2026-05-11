@@ -47,8 +47,14 @@ def test_language_review_flags_former_olympian():
 
 
 def test_language_review_flags_predictive_phrases():
-    """Predictive phrasing is counted, not blocked. The result still passes
-    when no forbidden terms are present, but the count is surfaced."""
+    """Predictive phrasing FAILS the review (VPS-DEC-053).
+
+    Per PROJECT_BRIEF §11 predictive constructions are FORBIDDEN, not
+    "soften to." The Day-6 Tucson failure proved that softening "will" →
+    "could" while leaving the rest of the sentence intact still leaks
+    predictive prose past the gate. The right behavior is: detect →
+    return draft to the Storyteller for revision.
+    """
     sub = LanguageReviewSubstage()
     result = sub.review(
         story_draft=_draft(
@@ -58,9 +64,15 @@ def test_language_review_flags_predictive_phrases():
             ),
         ),
     )
-    # No forbidden terms → passed=True.
-    assert result["passed"] is True
-    # But three predictive constructions counted.
+    # Predictive frames now FAIL the review.
+    assert result["passed"] is False
+    # And the offending constructions surface verbatim for the
+    # Storyteller's revision feedback.
+    violations = result["predictive_violations"]
+    assert any("this means" in v.lower() for v in violations)
+    assert any("will result in" in v.lower() for v in violations)
+    assert any("guarantees" in v.lower() for v in violations)
+    # Legacy count field still populated for audit-doc parity.
     assert result["predictive_phrases_softened"] >= 3
 
 

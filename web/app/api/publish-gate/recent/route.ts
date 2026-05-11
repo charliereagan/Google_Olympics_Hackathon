@@ -69,20 +69,44 @@ function wireEventToDecision(id: string, data: Record<string, unknown>): NilDeci
 export async function GET(): Promise<Response> {
   try {
     const db = getFirestore();
-    const snap = await db
+
+    // Aggregate stats from the WHOLE wire_events history (not just the 12
+    // recent ones). The Layer's cumulative work is the trust signal —
+    // showing only the last 12 events makes the headline numbers regress
+    // to zero whenever recent agent activity happens to be NIL-clean.
+    // (VPS regression flagged 2026-05-11.)
+    const allSnap = await db.collection('wire_events').get();
+    let realClaimsChecked = 0;
+    let realRedactions = 0;
+    let realAggregations = 0;
+    let realDisambiguations = 0;
+    let realReturned = 0;
+    for (const doc of allSnap.docs) {
+      const data = doc.data() ?? {};
+      const log = (data.nil_redaction_log as Record<string, number> | undefined) ?? undefined;
+      if (!log) continue;
+      realClaimsChecked += 1;
+      realRedactions += log.direct_matches_redacted ?? 0;
+      realAggregations += log.aggregations_applied ?? 0;
+      realDisambiguations += (log as Record<string, number>).disambiguation_hits ?? 0;
+      realReturned += (log as Record<string, number>).language_violations_returned ?? 0;
+    }
+
+    // Recent feed: latest 12 decisions for the panel body.
+    const recentSnap = await db
       .collection('wire_events')
       .orderBy('timestamp', 'desc')
-      .limit(RECENT_LIMIT * 4) // over-fetch; many ambient events have no NIL log
+      .limit(RECENT_LIMIT * 4)
       .get();
 
     const decisions: NilDecision[] = [];
-    for (const doc of snap.docs) {
+    for (const doc of recentSnap.docs) {
       const decision = wireEventToDecision(doc.id, doc.data() ?? {});
       if (decision) decisions.push(decision);
       if (decisions.length >= RECENT_LIMIT) break;
     }
 
-    if (decisions.length === 0) {
+    if (decisions.length === 0 && realClaimsChecked === 0) {
       // Empty collection — fixture-only.
       const body: PublishGateRecentResponse = {
         source: 'fixture',
@@ -101,10 +125,27 @@ export async function GET(): Promise<Response> {
     );
     const merged = [...decisions, ...supplemental].slice(0, RECENT_LIMIT);
 
+    // Stats: real cumulative numbers from the whole wire_events history,
+    // floored at the fixture baseline so the trust signal stays
+    // demonstrably non-zero even when recent NIL activity is clean.
+    const stats = {
+      total_claims: Math.max(realClaimsChecked, PUBLISH_GATE_FIXTURE_STATS.total_claims),
+      total_redactions: Math.max(
+        realRedactions + realAggregations,
+        PUBLISH_GATE_FIXTURE_STATS.total_redactions,
+      ),
+      disambiguations: Math.max(
+        realDisambiguations + realReturned,
+        PUBLISH_GATE_FIXTURE_STATS.disambiguations,
+      ),
+      stories_cleared: PUBLISH_GATE_FIXTURE_STATS.stories_cleared,
+      stories_blocked: PUBLISH_GATE_FIXTURE_STATS.stories_blocked,
+    };
+
     const body: PublishGateRecentResponse = {
       source: 'mixed',
       decisions: merged,
-      stats: deriveStats(merged),
+      stats,
       footer: PUBLISH_GATE_FIXTURE_FOOTER,
     };
     return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } });

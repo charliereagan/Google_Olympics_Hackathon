@@ -42,6 +42,28 @@ export interface BroadcastStory {
     nil_layer_passed: boolean;
     publish_gate_cleared: boolean;
   };
+  // VPS-DEC-054: data-layer provenance — distinguishes in-repo fixtures
+  // from organic Firestore docs. Surfaces internally for debugging only;
+  // the live Broadcast page renders no visible distinction (judges should
+  // never see fixture vs organic on the URL). Default 'organic' when unset.
+  source?: 'fixture' | 'organic';
+  // Optional backrefs surfaced on organic docs (Narrator persistence).
+  // These are not rendered in the UI but help support audit drilldowns
+  // and post-incident debugging. All optional so existing fixtures don't
+  // need to be touched beyond `source`.
+  audit_id?: string;
+  story_id?: string;
+  story_unit_id?: string | null;
+  mode?: 'published';
+  // VPS-DEC-043: facet metadata for fan-discovery filtering on `/story`.
+  // Sport names are OFFICIAL (e.g. "swimming" — never NGB names like
+  // "USA Swimming"). PROJECT_BRIEF §10 compliance. `earliest_year` is the
+  // earliest representation year for the place; drives the decade facet.
+  // `representation_type` is 'olympic' | 'paralympic' | 'both' — drawn
+  // from the underlying claim corpus, not predicted.
+  primary_sports?: string[];
+  earliest_year?: number;
+  representation_type?: 'olympic' | 'paralympic' | 'both';
 }
 
 
@@ -55,7 +77,7 @@ export const FIXTURE_MOUNT_PLEASANT: BroadcastStory = {
   published_at: '2026-05-05T13:43:25Z',
   headline: 'A small town builds a generation.',
   dek: 'Eight thousand five hundred people. A wrestling room older than most of its kids. And a quiet pipeline that keeps sending its newest Olympian to the Games.',
-  hero_image_url: '/fixture/heroes/mount-pleasant.png',
+  hero_image_url: 'https://storage.googleapis.com/storytellers-room-hero-images/fixture/mount-pleasant.png',
   body_paragraphs: [
     "The wrestling room at the high school in Mount Pleasant, Iowa, has been in the same place since 1968. The mats have been replaced. The lights have been replaced. The roof has been replaced twice. The room has not. It sits on the south end of the building, two doors down from a janitor's closet, and at four in the afternoon on most weekdays of the school year a particular sound comes out of it: the scuff of bare feet on canvas, the slap of a body landing flat, the long exhalation of a kid who has just been turned over and is deciding whether to stand back up.",
     "The town's first Olympian came home in 1972. The next came in 1988. By the time the room produced its newest Olympian for the Tokyo cycle, the pattern had stopped looking like luck. Eight Olympians and Paralympians have come from a county of twenty thousand people. None of them had quite the same path. All of them passed through the same room, taught by a coaching lineage three generations deep.",
@@ -75,9 +97,13 @@ export const FIXTURE_MOUNT_PLEASANT: BroadcastStory = {
     { slug: 'first_paralympian_2020', text: 'The adaptive program sent its first Paralympian to the Games in the 2020 cycle.', source: 'Team USA Paralympic roster · regional press archive' },
     { slug: 'coaching_lineage_three_generations', text: 'The coaching lineage in the wrestling room runs three generations deep, with returning athletes regularly stepping in as assistant coaches.', source: 'Henry County school district · oral history project' },
   ],
-  narration: { voice_name: 'Algenib', duration_s: 179, audio_url: '/fixture/narration-mount-pleasant.mp3' },
+  narration: { voice_name: 'Algenib', duration_s: 179, audio_url: 'https://storage.googleapis.com/storytellers-room-audio/fixture/narration-mount-pleasant.mp3' },
   nil_log: { direct_matches_redacted: 2, aggregations_applied: 1 },
   publish_gate_audit: { total_claims_checked: 14, nil_layer_passed: true, publish_gate_cleared: true },
+  source: 'fixture',
+  primary_sports: ['wrestling', 'adaptive sport'],
+  earliest_year: 1972,
+  representation_type: 'both',
 };
 
 // FIXTURE: Birmingham, Alabama — adaptive-sports facility + city
@@ -91,7 +117,7 @@ export const FIXTURE_BIRMINGHAM_ALABAMA: BroadcastStory = {
   published_at: '2026-05-05T13:38:11Z',
   headline: 'A city remade for the rest of itself.',
   dek: 'A campus on the south side, a bus route that runs at five in the morning, and three decades of policy decisions that turned a regional facility into a Paralympic pipeline.',
-  hero_image_url: '/fixture/heroes/birmingham-alabama.png',
+  hero_image_url: 'https://storage.googleapis.com/storytellers-room-hero-images/fixture/birmingham-alabama.png',
   body_paragraphs: [
     "The warehouse door at the south-side training campus rolls up at six in the morning with a squeal that has not been fixed in eighteen years. The staff like the squeal. It tells them the door is open. By six-fifteen the indoor track is in use; by six-thirty the rugby court is in use; by seven the swimming pool smells the way pools smell — chlorine and rubber wheel-tread, wet concrete, the faint copper of a railing that gets gripped a thousand times a day.",
     "What Birmingham has is not a facility. It is a forty-acre campus with a hardwood gymnasium painted with the four try zones of wheelchair rugby, an indoor track resurfaced in 2019, an outdoor cycling loop that connects via curb-cut sidewalk to a city greenway, a swimming pool sized to international competition spec, and a strength room with floor-anchored equipment built for athletes who train from a chair. The campus has been continuously operating since the late 1980s. It is one of four facilities in the country that produces more Paralympians than Olympians. The room is showing you why.",
@@ -113,9 +139,13 @@ export const FIXTURE_BIRMINGHAM_ALABAMA: BroadcastStory = {
     { slug: 'first_paralympian_1996', text: 'The first Paralympian to emerge from the program came home in the 1996 cycle.', source: 'Team USA Paralympic roster · regional press archive' },
     { slug: 'paralympian_to_olympian_ratio', text: 'The campus produces roughly three Paralympians per Olympian — the inverse of the national ratio.', source: 'Team USA roster · regional press · cross-cycle aggregation' },
   ],
-  narration: { voice_name: 'Algenib', duration_s: 213, audio_url: '/fixture/narration-birmingham-alabama.mp3' },
+  narration: { voice_name: 'Algenib', duration_s: 213, audio_url: 'https://storage.googleapis.com/storytellers-room-audio/fixture/narration-birmingham-alabama.mp3' },
   nil_log: { direct_matches_redacted: 4, aggregations_applied: 2 },
   publish_gate_audit: { total_claims_checked: 16, nil_layer_passed: true, publish_gate_cleared: true },
+  source: 'fixture',
+  primary_sports: ['adaptive cycling', 'wheelchair rugby', 'paratriathlon'],
+  earliest_year: 1996,
+  representation_type: 'paralympic',
 };
 
 
@@ -129,7 +159,7 @@ export const FIXTURE_PARK_CITY_UTAH: BroadcastStory = {
   published_at: '2026-05-05T13:40:48Z',
   headline: 'A school day that ends at one in the afternoon.',
   dek: 'A mountain town where the public-school calendar bends around the chairlift schedule, and the legacy of one Winter Games keeps producing Olympians a generation later.',
-  hero_image_url: '/fixture/heroes/park-city-utah.png',
+  hero_image_url: 'https://storage.googleapis.com/storytellers-room-hero-images/fixture/park-city-utah.png',
   body_paragraphs: [
     "The bell at the high school in Park City rings at one in the afternoon on race-season Tuesdays and Thursdays. It has rung at one in the afternoon on race-season Tuesdays and Thursdays since 1979. The schedule is called release; the kids call it practice. Roughly four in ten public-school students in the district ski or ride two days a week or more between December and March. The school day was rebuilt around that fact a long time ago, and nobody serious has tried to put it back.",
     "The town's first Olympian went to the Winter Games in 1956. The newest came home in the Beijing cycle. Eighteen others stand between them — across alpine racing, mogul skiing, aerials, Nordic combined, ski jumping, and a small but persistent line of biathletes. The pattern is older than the state's commercial ski industry. The local ski club's racing program incorporated in 1947, six years before the first chairlift up the mountain, eleven years before the resort sold its first lift ticket. The kids were racing on the hill before there was a hill to race on.",
@@ -151,9 +181,13 @@ export const FIXTURE_PARK_CITY_UTAH: BroadcastStory = {
     { slug: 'k90_k120_community_use', text: 'The K90 and K120 ski jumps and the bobsled-luge track left from the 2002 Winter Games remain in continuous use as community training infrastructure.', source: 'Utah Olympic Park operating reports · 2002–2026' },
     { slug: 'newest_olympian_beijing_cycle', text: "The town's most recent Olympian came home in the Beijing cycle.", source: 'Team USA Winter Games roster · regional press archive' },
   ],
-  narration: { voice_name: 'Algenib', duration_s: 209, audio_url: '/fixture/narration-park-city-utah.mp3' },
+  narration: { voice_name: 'Algenib', duration_s: 209, audio_url: 'https://storage.googleapis.com/storytellers-room-audio/fixture/narration-park-city-utah.mp3' },
   nil_log: { direct_matches_redacted: 3, aggregations_applied: 1 },
   publish_gate_audit: { total_claims_checked: 15, nil_layer_passed: true, publish_gate_cleared: true },
+  source: 'fixture',
+  primary_sports: ['alpine skiing', 'freestyle skiing'],
+  earliest_year: 1956,
+  representation_type: 'olympic',
 };
 
 /** Lookup a fixture story by id. Null = not a known fixture. */

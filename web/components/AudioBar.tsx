@@ -16,8 +16,11 @@
  *   autoplaying / direct-link-fallback → playing
  *   playing ↔ paused                (manual pause/resume after first start)
  *
- * Mute preference persists for the session under `storytellers.muted`
- * (sessionStorage clears on full reload — same-tab nav only).
+ * Mute is per-page only — NOT persisted across navigations. A broadcast
+ * page must greet every visitor with sound; persisting a stale "muted"
+ * pref across navs would make the page silent on arrival even when the
+ * click-navigation path grants the browser permission to autoplay with
+ * sound. Users who silence one story start fresh on the next.
  *
  * Hand-drawn 22×22 SVG play/pause and 24×24 mute toggle (no icon library).
  * Stroke-only; gold-warm → gold-deep on hover. 1px hairline progress.
@@ -27,7 +30,6 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const ROOM_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
-const MUTE_STORAGE_KEY = 'storytellers.muted';
 
 type PlaybackState =
   | 'loading'
@@ -49,26 +51,6 @@ function formatMmSs(seconds: number): string {
   const m = Math.floor(total / 60).toString().padStart(2, '0');
   const s = (total % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
-}
-
-/** Read persisted mute pref. SSR-safe — sessionStorage unavailable on server. */
-function readPersistedMuted(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.sessionStorage.getItem(MUTE_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-/** Persist mute pref. Failures (private mode, etc.) degrade silently. */
-function writePersistedMuted(muted: boolean): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.sessionStorage.setItem(MUTE_STORAGE_KEY, muted ? '1' : '0');
-  } catch {
-    /* no-op */
-  }
 }
 
 export function AudioBar({ src, duration_s_fallback, voice_name }: AudioBarProps) {
@@ -120,22 +102,23 @@ export function AudioBar({ src, duration_s_fallback, voice_name }: AudioBarProps
     if (!el) return;
     let cancelled = false;
 
-    const persistedMuted = readPersistedMuted();
-    setMuted(persistedMuted);
-    el.muted = persistedMuted;
+    // Always start unmuted — the click-navigated path (homepage CTA)
+    // gives the browser a fresh user gesture, so with-sound autoplay
+    // is permitted. We never carry a stale "muted" pref into a new
+    // story page; mute is per-page only.
+    el.muted = false;
+    setMuted(false);
 
     const tryAutoplay = async () => {
       try {
-        // Attempt 1: with sound (or muted, if user persisted that pref).
+        // Attempt 1: with sound.
         await el.play();
         if (cancelled) return;
-        // If user persisted muted, treat this as fallback so they see
-        // the BEGIN overlay and can elect to start with sound — matches
-        // VPS-DEC-044 ("never hidden behind a hover" + obvious affordance).
-        setState(persistedMuted ? 'direct-link-fallback' : 'autoplaying');
+        setState('autoplaying');
       } catch {
         if (cancelled) return;
-        // Browser blocked autoplay-with-sound (NotAllowedError typical).
+        // Browser blocked autoplay-with-sound (NotAllowedError typical
+        // for direct-link / refresh visits with no recent gesture).
         // Fall back to muted preroll + BEGIN BROADCAST overlay.
         el.muted = true;
         setMuted(true);
@@ -173,7 +156,6 @@ export function AudioBar({ src, duration_s_fallback, voice_name }: AudioBarProps
     if (!el) return;
     el.muted = false;
     setMuted(false);
-    writePersistedMuted(false);
     el.currentTime = 0;
     el.play()
       .then(() => setState('playing'))
@@ -184,6 +166,14 @@ export function AudioBar({ src, duration_s_fallback, voice_name }: AudioBarProps
     const el = audioRef.current;
     if (!el) return;
     if (el.paused) {
+      // Pressing play is an explicit "I want to hear this" gesture.
+      // If the element is currently muted (from a manual toggle or a
+      // muted-preroll fallback), unmute it so the user hears sound on
+      // the very first click of the play button — not the second.
+      if (el.muted) {
+        el.muted = false;
+        setMuted(false);
+      }
       el.play()
         .then(() => setState('playing'))
         .catch(() => setState('paused'));
@@ -198,7 +188,6 @@ export function AudioBar({ src, duration_s_fallback, voice_name }: AudioBarProps
     const next = !el.muted;
     el.muted = next;
     setMuted(next);
-    writePersistedMuted(next);
   }, []);
 
   const handleSeek = useCallback(

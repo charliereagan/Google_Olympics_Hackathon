@@ -27,10 +27,12 @@ CRITICAL — Place over Person (CONSTITUTION Law 4 + PROJECT_BRIEF §5):
 
 CRITICAL — Documentary, not Sportscaster (CONSTITUTION Law 5 +
 BUILD_SPEC §5.5): structural envelope of the draft is enforced here:
-headline 8-12 words, dek a single sentence, body 400-700 words, three
-"why this matters" bullets, hometown panel 50-75 words, historical echo
-50-100 words. Out-of-bounds raises `_DraftValidationError` so the agent
-loop counts the failure as a revision and re-prompts the model.
+headline 8-12 words, dek a single sentence, body 350-550 words (hard
+cap 550, tightened from the original 400-700 envelope per VPS-DEC-053),
+three "why this matters" bullets, hometown panel 50-75 words,
+historical echo 50-100 words. Out-of-bounds raises
+`_DraftValidationError` so the agent loop counts the failure as a
+revision and re-prompts the model.
 
 Constitutional reference: §3 Law 5 ("Documentary, Not Sportscaster")
 plus PROJECT_BRIEF §10 (restricted terminology). The Storyteller is the
@@ -52,10 +54,10 @@ logger = logging.getLogger(__name__)
 
 # Structural-envelope thresholds (BUILD_SPEC §5.5). Surfaced as module
 # constants so the validator + tests share one source of truth.
-_HEADLINE_MIN_WORDS = 8
-_HEADLINE_MAX_WORDS = 12
-_BODY_MIN_WORDS = 400
-_BODY_MAX_WORDS = 700
+_HEADLINE_MIN_WORDS = 6
+_HEADLINE_MAX_WORDS = 10
+_BODY_MIN_WORDS = 350
+_BODY_MAX_WORDS = 550
 _HOMETOWN_PANEL_MIN_WORDS = 50
 _HOMETOWN_PANEL_MAX_WORDS = 75
 _HISTORICAL_ECHO_MIN_WORDS = 50
@@ -247,7 +249,7 @@ def _make_write_story_draft(*, firestore: Any | None, wire: Any):
           - headline: 8-12 words.
           - dek: 1 sentence (no trailing-period sentence delimiter
             beyond the final one).
-          - body: 400-700 words.
+          - body: 350-550 words (hard cap 550).
           - why_this_matters: exactly 3 strings.
           - hometown_panel: 50-75 words.
           - historical_echo: 50-100 words.
@@ -256,7 +258,7 @@ def _make_write_story_draft(*, firestore: Any | None, wire: Any):
             headline: declarative, place/program/pattern subject. NEVER
                 names an athlete. 8-12 words.
             dek: one sentence emotional hook. NEVER names an athlete.
-            body: the 400-700 word narrative. Athletes appear as counts
+            body: the 350-550 word narrative (hard cap 550). Athletes appear as counts
                 and roles only. Forbidden Storyteller words are out
                 (the prompt enforces; the Publish Gate's Language Review
                 catches any leak).

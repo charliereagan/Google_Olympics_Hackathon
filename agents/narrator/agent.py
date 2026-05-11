@@ -757,6 +757,12 @@ class NarratorAgent:
     ) -> None:
         """Write the cleared draft + manifest to `published_stories`.
 
+        Shape MATCHES `web/lib/story-fixture.ts::BroadcastStory` verbatim
+        so the `/story/[id]` route's Firestore fallback validator can
+        accept the doc with no field-rename gymnastics. Worker E's earlier
+        write diverged on field names; this rewrite is the surgical fix
+        (VPS-DEC-054).
+
         Skipped silently when:
           - firestore is unavailable (test stubs without `_firestore`)
           - the manifest is a fallback (no audio rendered)
@@ -774,38 +780,95 @@ class NarratorAgent:
             return
 
         story_id = draft.get("story_id") or manifest.get("story_id") or ""
-        story_unit_id = draft.get("story_unit_id")
-        # NIL signature: pulled from the cleared publish_audit when an
-        # audit_id was threaded through. Best-effort — the audit may have
-        # been written by a stub coll.add() so direct doc-id lookups can
-        # miss; we fall back to a scan.
+        # `story_unit_id` propagation: prefer the audit doc (the orchestrator
+        # writes it there now per Worker SP-this), fall back to the draft.
         audit = await self._read_publish_audit(audit_id) if audit_id else None
-        nil_signature = _build_nil_signature(audit)
+        story_unit_id = draft.get("story_unit_id")
+        if isinstance(audit, dict):
+            audit_unit_id = audit.get("story_unit_id")
+            if audit_unit_id:
+                story_unit_id = audit_unit_id
+
+        # Fact-check / NIL counts mirrored onto the doc shape Broadcast reads.
+        sub_stages = (audit or {}).get("sub_stages") or {}
+        fact_check = sub_stages.get("fact_check") or {}
+        nil_review = sub_stages.get("nil_redaction_review") or {}
+        claims_checked = int(fact_check.get("claims_checked") or 0)
+        removed_claims = fact_check.get("removed_claims") or []
+        claims_removed = (
+            len(removed_claims) if isinstance(removed_claims, list)
+            else int(fact_check.get("claims_removed") or 0)
+        )
+        claims_passed = max(0, claims_checked - claims_removed)
+        direct_matches_redacted = int(nil_review.get("redacted") or 0)
+        aggregations_applied = int(nil_review.get("aggregated") or 0)
+        nil_layer_passed = (
+            bool(nil_review.get("passed")) if "passed" in nil_review else True
+        )
+        publish_gate_cleared = (
+            (audit or {}).get("final_decision") == "cleared"
+            if audit is not None
+            else True
+        )
+        # VPS-DEC-053: surface the audit-level count of times language_review
+        # returned this draft for revision (vs. silently softening). Visible
+        # in the Broadcast page's audit drawer alongside the fact-check
+        # counts, proving the Layer caught and returned vs. let through.
+        language_violations_returned = int(
+            (audit or {}).get("language_violations_returned_to_storyteller") or 0
+        )
 
         duration_ms = int(manifest.get("audio_duration_ms") or 0)
-        manifest_id = manifest.get("story_id") or story_id
+
+        # `place_name_for_cues` is the cue-detection helper (e.g., "the
+        # county seat") and not the Broadcast kicker source. The kicker
+        # comes from the canonical `place_name` ("Tucson, Arizona") which
+        # the Storyteller writes onto the draft. Fall back to the cues
+        # field only when the canonical is absent (test stubs).
+        raw_place = draft.get("place_name") or draft.get("place_name_for_cues") or ""
+        kicker_place = _format_kicker(raw_place)
 
         published: dict[str, Any] = {
-            "story_id": story_id,
-            "story_unit_id": story_unit_id,
-            "kicker_place": draft.get("place_name_for_cues")
-            or draft.get("place_name"),
+            # `id` field is intentionally OMITTED — the route synthesizes
+            # `id = "organic-<doc_id>"` from the Firestore doc id at read
+            # time. Writing a placeholder here would diverge.
+            "kicker_place": kicker_place,
+            "published_at": self._clock().isoformat(),
             "headline": draft.get("headline", ""),
             "dek": draft.get("dek", ""),
+            "hero_image_url": draft.get("hero_image_url"),
             "body_paragraphs": _split_paragraphs(draft.get("body", "")),
             "pull_quote": draft.get("pull_quote"),
-            "verified_claims": draft.get("verified_claims", []),
+            "pull_quote_after_paragraph": draft.get("pull_quote_after_paragraph"),
+            "claims_checked": claims_checked,
+            "claims_passed": claims_passed,
+            "claims_removed": claims_removed,
+            "claims": list(draft.get("verified_claims") or []),
             "narration": {
                 "voice_name": manifest.get("voice_name") or voice_profile,
-                "audio_url": audio_urls[0],
-                "audio_urls": list(audio_urls),
                 "duration_s": duration_ms // 1000,
-                "manifest_id": manifest_id,
+                "audio_url": audio_urls[0],
             },
-            "hero_image_url": draft.get("hero_image_url"),
-            "nil_signature": nil_signature,
+            "nil_log": {
+                "direct_matches_redacted": direct_matches_redacted,
+                "aggregations_applied": aggregations_applied,
+            },
+            "publish_gate_audit": {
+                "total_claims_checked": claims_checked,
+                "nil_layer_passed": nil_layer_passed,
+                "publish_gate_cleared": publish_gate_cleared,
+                # VPS-DEC-053
+                "language_violations_returned": language_violations_returned,
+            },
+            # VPS-DEC-054: `source` distinguishes organic Firestore docs
+            # from in-repo fixtures so the data layer can debug
+            # provenance without ever surfacing it on the user-visible
+            # Broadcast page.
+            "source": "organic",
+            # Backrefs for traceability — not rendered in the UI.
             "audit_id": audit_id,
-            "published_at": self._clock().isoformat(),
+            "story_id": story_id,
+            "story_unit_id": story_unit_id,
             "mode": "published",
         }
 
@@ -973,12 +1036,84 @@ def _split_paragraphs(body: str) -> list[str]:
     return [p.strip() for p in body.split("\n\n") if p.strip()]
 
 
+# State-abbreviation lookup for `_format_kicker`. Intentionally minimal —
+# covers the Olympic / Paralympic pipeline states the Storyteller actually
+# produces drafts for. Anything not in the table falls through unchanged
+# (the kicker still reads as the place's voice, just with the abbrev
+# capitalized).
+_STATE_ABBREV_TO_NAME: dict[str, str] = {
+    "AL": "ALABAMA",
+    "AZ": "ARIZONA",
+    "CA": "CALIFORNIA",
+    "CO": "COLORADO",
+    "FL": "FLORIDA",
+    "GA": "GEORGIA",
+    "IA": "IOWA",
+    "IL": "ILLINOIS",
+    "MI": "MICHIGAN",
+    "MN": "MINNESOTA",
+    "NY": "NEW YORK",
+    "OH": "OHIO",
+    "OR": "OREGON",
+    "PA": "PENNSYLVANIA",
+    "TX": "TEXAS",
+    "UT": "UTAH",
+    "VA": "VIRGINIA",
+    "WA": "WASHINGTON",
+    "WI": "WISCONSIN",
+}
+
+
+def _format_kicker(place_name: str) -> str:
+    """Format `place_name` as the Broadcast kicker prefix.
+
+    Examples:
+      - "Tucson, Arizona"      -> "PUBLISHED · TUCSON · ARIZONA"
+      - "Mount Pleasant, IA"   -> "PUBLISHED · MOUNT PLEASANT · IOWA"
+      - "Park City, Utah"      -> "PUBLISHED · PARK CITY · UTAH"
+      - "Birmingham, Alabama"  -> "PUBLISHED · BIRMINGHAM · ALABAMA"
+      - ""                     -> "PUBLISHED" (defensive — no place split)
+
+    Two-letter state abbreviations are expanded via `_STATE_ABBREV_TO_NAME`;
+    unknown abbreviations fall through capitalized as-is. The middle dot is
+    U+00B7 to match the fixture kickers (BroadcastStory.kicker_place).
+    """
+    text = (place_name or "").strip()
+    if not text:
+        return "PUBLISHED"
+    # Split on the FIRST comma — places like "St. Louis, MO" contain
+    # only a single separator; places without a comma are treated as
+    # the city alone.
+    if "," in text:
+        city_raw, state_raw = text.split(",", 1)
+    else:
+        city_raw, state_raw = text, ""
+    city = city_raw.strip().upper()
+    state_token = state_raw.strip().upper()
+    if not state_token:
+        return f"PUBLISHED · {city}".rstrip(" ·")
+    # Two-letter token → abbreviation lookup; anything else stays as-is.
+    if len(state_token) == 2 and state_token in _STATE_ABBREV_TO_NAME:
+        state = _STATE_ABBREV_TO_NAME[state_token]
+    elif len(state_token) == 2:
+        state = state_token  # unknown abbreviation — leave it alone
+    else:
+        state = state_token
+    return f"PUBLISHED · {city} · {state}"
+
+
 def _build_nil_signature(audit: dict | None) -> dict:
     """Pull the NIL signature off a cleared publish_audit doc.
 
     The signature surfaces in `published_stories.nil_signature` so the
     Broadcast page can render the audit drawer's "29 claims checked,
     1 softened, 0 removed" line — proof of trust per Demo Moment 5.
+
+    Per VPS-DEC-053 also surfaces `language_violations_returned` — the
+    audit-level count of times language_review caught and returned this
+    draft for revision (vs. silently softening, the Day-6 Tucson failure
+    mode). Visible on the published page's audit drawer alongside the
+    fact-check counts.
     """
     if not isinstance(audit, dict):
         return {
@@ -987,6 +1122,7 @@ def _build_nil_signature(audit: dict | None) -> dict:
             "claims_removed": 0,
             "redactions": 0,
             "aggregations": 0,
+            "language_violations_returned": 0,
         }
     sub_stages = audit.get("sub_stages") or {}
     fact_check = sub_stages.get("fact_check") or {}
@@ -1001,6 +1137,9 @@ def _build_nil_signature(audit: dict | None) -> dict:
         ),
         "redactions": int(nil_review.get("redacted") or 0),
         "aggregations": int(nil_review.get("aggregated") or 0),
+        "language_violations_returned": int(
+            audit.get("language_violations_returned_to_storyteller") or 0
+        ),
     }
 
 

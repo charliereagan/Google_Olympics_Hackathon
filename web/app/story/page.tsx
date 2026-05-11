@@ -1,5 +1,6 @@
-import Link from 'next/link';
+import { Suspense } from 'react';
 import { Layout } from '@/components/Layout';
+import { StoryFacets } from '@/components/StoryFacets';
 import { ALL_FIXTURE_STORIES } from '@/lib/story-fixture';
 
 // /story — index of available Broadcast pages.
@@ -10,6 +11,10 @@ import { ALL_FIXTURE_STORIES } from '@/lib/story-fixture';
 // page will additionally read recent docs from Firestore. For now the
 // fixture is sufficient for demo moment #4.
 //
+// VPS-DEC-043: fan-discovery facets (sport / era / type) sit between
+// the page header and the story list. Filtering is inline; query
+// params reflect facet state so a fan can share a filtered view.
+//
 // Aesthetic: hairline-only ribbon list — same register as the
 // VerifiedClaims component on the Broadcast page itself. No card
 // shadows. No grid of teasers. Editorial.
@@ -18,7 +23,7 @@ export default function StoryIndexPage() {
   return (
     <Layout>
       <section className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-24">
-        <header className="mb-12 sm:mb-16">
+        <header className="mb-10 sm:mb-12">
           <p className="font-mono text-mono-sm uppercase tracking-[0.18em] text-gold-warm">
             published stories
           </p>
@@ -31,34 +36,22 @@ export default function StoryIndexPage() {
           </p>
         </header>
 
-        <ul className="divide-y divide-navy-light border-y border-navy-light">
-          {ALL_FIXTURE_STORIES.map((story) => (
-            <li key={story.id}>
-              <Link
-                href={`/story/${story.id}`}
-                className="group block py-8 transition-colors duration-200 ease-room"
-              >
-                <div className="flex items-baseline justify-between gap-4">
-                  <span className="font-mono text-mono-sm uppercase tracking-[0.16em] text-gold-warm/80">
-                    {story.kicker_place}
-                  </span>
-                  <span className="shrink-0 font-mono text-mono-sm text-wire-time">
-                    {new Date(story.published_at)
-                      .toISOString()
-                      .slice(0, 10)}
-                  </span>
-                </div>
-                <h2 className="mt-3 font-display text-display-md leading-tight text-cream group-hover:text-gold-warm">
-                  {story.headline}
-                </h2>
-                <p className="mt-3 max-w-2xl font-italic italic text-italic-md text-wire-text">
-                  {story.dek}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        {/* useSearchParams() requires a Suspense boundary in Next.js 15. */}
+        <Suspense fallback={<StoryFacetsFallback />}>
+          <StoryFacets stories={ALL_FIXTURE_STORIES} />
+        </Suspense>
       </section>
     </Layout>
+  );
+}
+
+// Pre-hydration skeleton — preserves layout height so the page doesn't
+// jump when facets mount. Hairline-only register; no shimmer.
+function StoryFacetsFallback() {
+  return (
+    <div
+      aria-hidden="true"
+      className="mb-10 h-[180px] border-y border-navy-light/60"
+    />
   );
 }

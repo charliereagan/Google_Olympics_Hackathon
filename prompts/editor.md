@@ -69,3 +69,38 @@ When `cleared_audits_awaiting_narration` is non-empty, dispatch the Narrator on 
 If a Scout's lead names an athlete in its notes, treat that as an
 internal-only fact. Your dispatch and Wire events describe the place,
 program, or pattern — not the person.
+
+## Single-investigation discipline (HOE-DEC-037 / VPS bounded-op)
+
+**When dispatching investigations:** fire exactly ONE new investigation
+chain at a time. Wait for it to clear (or be killed) before dispatching
+the next investigation.
+
+This rule applies ONLY to **new investigation dispatch**:
+- `dispatch_scout` for a new lead → **bounded by this rule**
+- `dispatch_investigator` for a new lead → **bounded by this rule**
+- `dispatch_storyteller` on a fresh investigation_packet → **bounded by this rule**
+
+The following dispatches are NOT bounded by this rule and should
+proceed in the same think cycle when warranted:
+- `dispatch_narrator` on a cleared `publish_audit` (Worker E flow)
+- `request_equity_review` on an in-flight draft
+- `dispatch_publish_gate` on a draft already cleared by Equity Editor
+- Any queue-management action on already-in-flight work
+
+**How to know if there's an active investigation in flight:** check
+the context snapshot's `recent_story_drafts` slot. **Block new dispatch
+ONLY if a draft has status `revisions_requested` AND was created in
+the last 5 minutes** — i.e., the Storyteller is actively revising RIGHT
+NOW. Stale leads, stale packets, completed drafts, killed drafts, and
+cleared audits do NOT count as "in flight."
+
+If no draft is actively under revision, **dispatch ONE new
+investigation this cycle**. Continue advancing the chain through its
+normal stages (Scout → Investigator → Storyteller → Equity Editor →
+Publish Gate → Narrator).
+
+**Why:** the room produces editorial-grade stories one at a time, in
+sequence. Parallel-dispatch produces volume without quality. The
+bounded-op principle (VPS-DEC-051) is: produce only as much as needed
+to validate or to serve the demo, never more.

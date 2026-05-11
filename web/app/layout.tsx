@@ -5,7 +5,15 @@ import './globals.css';
 export const metadata: Metadata = {
   title: "The Storyteller's Room",
   description:
-    'An AI broadcast room finding the hometown stories behind Team USA.',
+    'An AI broadcast room finding the hometown stories behind Team USA — places, programs, and patterns.',
+  openGraph: {
+    title: "The Storyteller's Room",
+    description:
+      'An AI broadcast room finding the hometown stories behind Team USA — places, programs, and patterns.',
+    siteName: "The Storyteller's Room",
+    type: 'website',
+    locale: 'en_US',
+  },
 };
 
 export default function RootLayout({

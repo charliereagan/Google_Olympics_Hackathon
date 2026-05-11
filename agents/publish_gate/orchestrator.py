@@ -233,16 +233,38 @@ class PublishGateAgent:
             else:
                 final_decision = "returned"
 
+        # VPS-DEC-053: count "this draft was returned by language_review."
+        # Tally per-audit (0 or 1 in normal single-pass operation). When
+        # the orchestrator is replayed across the revision loop, downstream
+        # audit aggregators can sum this field across audits sharing the
+        # same story_id to surface the total revision-loop count. Counted
+        # on both 'returned' and 'killed' so a max-revisions kill at the
+        # language_review stage still surfaces in the audit.
+        language_returned = (
+            1
+            if (
+                first_failure == "language_review"
+                and final_decision in ("returned", "killed")
+            )
+            else 0
+        )
+
         audit_id = uuid.uuid4().hex
         audit = PublishAudit(
             audit_id=audit_id,
             story_id=story_draft_id,
+            # story_unit_id is the place/program/pattern search key the
+            # Narrator + Broadcast surface read; propagating it onto the
+            # audit doc fixes a Day-6 Tucson gap where the Narrator's
+            # `_persist_published_story` had to fall back to None.
+            story_unit_id=story_unit_id or "",
             investigation_packet_id=packet_id,
             sub_stages=sub_stages,
             final_decision=final_decision,
             completed_at=_iso_now(),
             revisions_requested=revisions_requested,
             kill_reason=kill_reason,
+            language_violations_returned_to_storyteller=language_returned,
         )
 
         # --- Persist + emit ------------------------------------------------
@@ -1418,6 +1440,17 @@ def _render_revision_request(sub_stages: dict, first_failure: str | None) -> str
         flagged = failed.get("flagged_terms") or []
         if flagged:
             lines.append(f"flagged terms: {flagged}")
+        # VPS-DEC-053: predictive-frame violations are returned to the
+        # Storyteller verbatim so the revision pass can find and rewrite
+        # the offending construction (rather than soften the modal in
+        # place, which was the Day-6 Tucson failure).
+        violations = failed.get("predictive_violations") or []
+        reasons = failed.get("predictive_reasons") or []
+        if violations:
+            lines.append("predictive frames (rewrite, do not soften in place):")
+            for i, v in enumerate(violations):
+                reason = reasons[i] if i < len(reasons) else "predictive"
+                lines.append(f"  - {v!r} — {reason}")
     return "\n".join(lines)
 
 

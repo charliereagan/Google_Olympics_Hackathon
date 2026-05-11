@@ -12,16 +12,21 @@ Three categories of patterns:
   2. CONTEXT_AWARE_FORBIDDEN — flagged only when within ~30 chars of a
      disability-context word (e.g., "fighter" + "paralympic" → flag;
      "fighter" alone → ignore).
-  3. PREDICTIVE_PATTERNS — counted into `predictive_phrases_softened`
-     for audit visibility. The agent doesn't auto-soften the text; the
-     count is a flag for the Storyteller's revision pass.
+  3. PREDICTIVE_PATTERNS — flagged AS A FAIL (VPS-DEC-053). Predictive
+     frames are FORBIDDEN per PROJECT_BRIEF §11, not "soften to." The
+     Day-6 Tucson failure proved that softening "will" → "could" while
+     leaving the rest of the sentence intact still leaks predictive
+     prose past the gate. We now return the draft to the Storyteller
+     for revision and surface the offending constructions verbatim.
 
 ENCOURAGED_TEMPORAL_PATTERNS describe a place's representation
 ("first Olympian", "next Paralympian", etc.) per PROJECT_BRIEF §10 +
 CONSTITUTION Law 5. They MUST NOT be flagged on the surface words
 "Olympian" / "Paralympian" — the regex matches both forbidden and
 encouraged constructions; we re-scan and remove any flagged_terms
-overlapping an encouraged pattern before returning.
+overlapping an encouraged pattern before returning. Predictive patterns
+do not include "first/next/newest/oldest"-style temporal phrasing, so
+the encouraged-overlap filter cannot accidentally suppress them.
 
 Voice text lives in `/prompts/publish_gate.md`. This module's prose
 contains zero forbidden words outside the explicit FORBIDDEN_WORDS list.
@@ -89,16 +94,42 @@ _DISABILITY_CONTEXT_TOKENS: list[re.Pattern[str]] = [
 ]
 _CONTEXT_WINDOW_CHARS = 30
 
-# Predictive constructions (PROJECT_BRIEF §11). These get COUNTED, not
-# automatically removed. The Storyteller's revision pass softens them.
-PREDICTIVE_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\bwill result in\b", re.IGNORECASE),
-    re.compile(r"\bguarantees?\b", re.IGNORECASE),
-    re.compile(r"\bpredicts?\b", re.IGNORECASE),
-    re.compile(r"\bensures?\b", re.IGNORECASE),
-    re.compile(r"\bthis means\b", re.IGNORECASE),
-    re.compile(r"\bthis proves\b", re.IGNORECASE),
+# Predictive constructions (PROJECT_BRIEF §11; VPS-DEC-053).
+#
+# Each entry is a (lead-phrase regex, human-readable label) pair. The
+# scanner detects the lead phrase and captures up to ~120 chars of
+# trailing context (or the next sentence terminator, whichever comes
+# first) so the violation can be reported verbatim to the Storyteller.
+#
+# Per VPS-DEC-053 these are HARD FAILS — the Day-6 Tucson failure proved
+# that softening the modal ("will" → "could") while leaving the rest of
+# the predictive sentence intact still produces policy-memo prose. The
+# right move is: detect → return draft to Storyteller for revision.
+PREDICTIVE_LEAD_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bcould lead to\b", re.IGNORECASE), "predictive: 'could lead to'"),
+    (re.compile(r"\bmay lead to\b", re.IGNORECASE), "predictive: 'may lead to'"),
+    (re.compile(r"\bwill lead to\b", re.IGNORECASE), "predictive: 'will lead to'"),
+    (re.compile(r"\bwill result in\b", re.IGNORECASE), "predictive: 'will result in'"),
+    (re.compile(r"\bmay indicate\b", re.IGNORECASE), "predictive: 'may indicate'"),
+    (re.compile(r"\bcould indicate\b", re.IGNORECASE), "predictive: 'could indicate'"),
+    (re.compile(r"\bis positioned to\b", re.IGNORECASE), "predictive: 'is positioned to'"),
+    (re.compile(r"\bare positioned to\b", re.IGNORECASE), "predictive: 'are positioned to'"),
+    (re.compile(r"\bis poised to\b", re.IGNORECASE), "predictive: 'is poised to'"),
+    (re.compile(r"\bare poised to\b", re.IGNORECASE), "predictive: 'are poised to'"),
+    (re.compile(r"\bpoints toward\b", re.IGNORECASE), "predictive: 'points toward'"),
+    (re.compile(r"\bsuggests a future\b", re.IGNORECASE), "predictive: 'suggests a future'"),
+    (re.compile(r"\bis on track to\b", re.IGNORECASE), "predictive: 'is on track to'"),
+    (re.compile(r"\bare on track to\b", re.IGNORECASE), "predictive: 'are on track to'"),
+    (re.compile(r"\bguarantees?\b", re.IGNORECASE), "predictive: 'guarantee(s)'"),
+    (re.compile(r"\bpredicts?\b", re.IGNORECASE), "predictive: 'predict(s)'"),
+    (re.compile(r"\bensures?\b", re.IGNORECASE), "predictive: 'ensure(s)'"),
+    (re.compile(r"\bthis means\b", re.IGNORECASE), "predictive: 'this means'"),
+    (re.compile(r"\bthis proves\b", re.IGNORECASE), "predictive: 'this proves'"),
 ]
+
+# Maximum trailing-context chars to capture after a predictive lead phrase
+# (truncated at the next sentence terminator).
+_PREDICTIVE_TAIL_CHARS = 120
 
 # Encouraged temporal constructions per PROJECT_BRIEF §10 + CONSTITUTION
 # Law 5. These describe a PLACE'S representation arc and are required for
@@ -192,18 +223,44 @@ def _spans_overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return not (a[1] <= b[0] or b[1] <= a[0])
 
 
+def _capture_predictive_violation(text: str, start: int) -> str:
+    """Capture a predictive-frame violation verbatim from `text`.
+
+    Starting at `start` (the lead phrase's position), walk forward up to
+    `_PREDICTIVE_TAIL_CHARS` chars or until the next sentence terminator
+    (`.`, `!`, `?`, newline) — whichever comes first. The returned slice
+    is the offending construction the Storyteller must revise.
+    """
+    end_cap = min(len(text), start + _PREDICTIVE_TAIL_CHARS)
+    # Walk to the first sentence terminator inside the capped window.
+    end = end_cap
+    for i in range(start, end_cap):
+        ch = text[i]
+        if ch in ".!?\n":
+            end = i
+            break
+    snippet = text[start:end].strip()
+    return snippet
+
+
 def _scan_surface(
     text: str,
-) -> tuple[list[str], int]:
-    """Scan one text surface. Return (flagged_terms, predictive_count).
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Scan one text surface.
 
-    `flagged_terms` is a list of the actual matched substrings (lowered)
-    suitable for audit display. Encouraged-temporal overlaps are filtered
-    out. Context-aware forbidden words are filtered if they don't sit
-    near a disability-context anchor.
+    Returns ``(flagged_terms, predictive_hits)`` where:
+      - `flagged_terms` is a list of the actual matched forbidden substrings
+        (lowered) suitable for audit display. Encouraged-temporal overlaps
+        are filtered out. Context-aware forbidden words are filtered if
+        they don't sit near a disability-context anchor.
+      - `predictive_hits` is a list of (verbatim_construction, reason)
+        tuples — one per detected predictive frame. Each construction is
+        captured verbatim from the source text (case preserved) up to the
+        next sentence terminator so the Storyteller can find and rewrite
+        the exact phrase.
     """
     if not text:
-        return [], 0
+        return [], []
 
     flagged: list[str] = []
 
@@ -232,12 +289,28 @@ def _scan_surface(
                     continue
                 flagged.append(m.group(0).lower())
 
-    # 4. Predictive count.
-    predictive_count = 0
-    for pat in PREDICTIVE_PATTERNS:
-        predictive_count += len(pat.findall(text))
+    # 4. Predictive-frame scan (VPS-DEC-053). Capture verbatim with tail.
+    #    De-dupe by (lowered_construction, reason) so the same lead phrase
+    #    appearing twice in the same surface only reports once.
+    predictive_hits: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for pat, label in PREDICTIVE_LEAD_PATTERNS:
+        for m in pat.finditer(text):
+            span = m.span()
+            # Defensive: filter out any predictive hit overlapping an
+            # encouraged-temporal span. Predictive patterns above don't
+            # use 'first/next/newest/oldest' phrasing, but this guards
+            # future additions to either list.
+            if any(_spans_overlap(span, e) for e in encouraged_spans):
+                continue
+            snippet = _capture_predictive_violation(text, span[0])
+            key = (snippet.lower(), label)
+            if key in seen:
+                continue
+            seen.add(key)
+            predictive_hits.append((snippet, label))
 
-    return flagged, predictive_count
+    return flagged, predictive_hits
 
 
 class LanguageReviewSubstage:
@@ -256,32 +329,52 @@ class LanguageReviewSubstage:
             story_draft: the StoryDraft dict per BUILD_SPEC §8.5.
 
         Returns:
-            `LanguageReviewResult` with `restricted_terms_flagged`,
-            `flagged_terms` (deduped, sorted), `predictive_phrases_softened`,
-            and `passed = (restricted_terms_flagged == 0)`.
+            `LanguageReviewResult`. `passed` is True iff there are zero
+            restricted-term flags AND zero predictive-frame violations.
+            On a predictive-frame hit, `predictive_violations` lists the
+            offending constructions verbatim and `predictive_reasons`
+            carries the per-violation 1-line reason for the Storyteller's
+            revision feedback (VPS-DEC-053). `predictive_phrases_softened`
+            is preserved as a deprecated count for audit-doc parity.
         """
         draft = story_draft or {}
 
         all_flagged: list[str] = []
-        predictive_total = 0
+        all_predictive_hits: list[tuple[str, str]] = []
 
         for surface in _SURFACES:
             text = draft.get(surface) or ""
             if not isinstance(text, str):
                 continue
-            flagged, predictive_count = _scan_surface(text)
+            flagged, predictive_hits = _scan_surface(text)
             all_flagged.extend(flagged)
-            predictive_total += predictive_count
+            all_predictive_hits.extend(predictive_hits)
 
         # Dedupe + sort for stable audit output. We keep the first
         # occurrence's casing implicitly via lowercase.
         deduped = sorted(set(all_flagged))
 
-        passed = len(deduped) == 0
+        # Cross-surface de-dupe of predictive hits by (lowered_snippet, reason).
+        seen_keys: set[tuple[str, str]] = set()
+        violations: list[str] = []
+        reasons: list[str] = []
+        for snippet, reason in all_predictive_hits:
+            key = (snippet.lower(), reason)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            violations.append(snippet)
+            reasons.append(reason)
+
+        passed = (len(deduped) == 0) and (len(violations) == 0)
 
         return LanguageReviewResult(
             restricted_terms_flagged=len(deduped),
             flagged_terms=deduped,
-            predictive_phrases_softened=predictive_total,
+            # Legacy field: count of predictive hits across all surfaces.
+            # Kept for backward compatibility with existing audit consumers.
+            predictive_phrases_softened=len(violations),
+            predictive_violations=violations,
+            predictive_reasons=reasons,
             passed=passed,
         )

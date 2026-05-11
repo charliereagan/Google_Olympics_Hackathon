@@ -34,6 +34,23 @@ body {
   );
 }
 
+/* Hero infographic staggered rise — Broadcast page right-side panel.
+   Each sub-block (sport tags / each big-number / each timeline row) fades
+   up from translateY(8px) into final position. Per-item animationDelay is
+   applied inline. `both` fill mode keeps the element hidden until its
+   delay elapses, so nothing flashes through the painterly hero before the
+   curtain-rise sequence has finished. */
+@keyframes hero-info-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Reduced motion respected per design-system.md §5.4 */
 @media (prefers-reduced-motion: reduce) {
   *,

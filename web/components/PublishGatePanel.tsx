@@ -157,7 +157,14 @@ export function PublishGatePanel() {
   return (
     <article className="mx-auto max-w-4xl px-4 py-12 sm:px-6 sm:py-16 md:px-8 md:py-20">
       <header>
-        <p className="font-body text-caption uppercase tracking-[0.18em] text-gold-warm">
+        <p
+          className="font-mono text-mono-sm uppercase text-wire-time"
+          style={{ letterSpacing: '0.22em' }}
+        >
+          BEHIND THE SCENES
+        </p>
+        <div aria-hidden="true" className="mt-2 h-px w-8 bg-gold-warm/40" />
+        <p className="mt-4 font-body text-caption uppercase tracking-[0.18em] text-gold-warm">
           Publish Gate &middot; NIL Redaction Layer &middot; Audit
         </p>
         <h1 className="mt-4 font-display text-display-md text-cream sm:text-display-lg">

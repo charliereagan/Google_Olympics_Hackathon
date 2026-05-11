@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Standalone build target — produces a self-contained .next/standalone/
+  // tree the Cloud Run runner-stage Dockerfile copies. Reduces image size
+  // by ~10x (no node_modules in final image; only what's traced).
+  output: 'standalone',
   experimental: {
     // Per design-system.md and BUILD_SPEC §3.9
     serverActions: { bodySizeLimit: '2mb' },

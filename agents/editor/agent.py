@@ -288,6 +288,14 @@ class EditorAgent:
             — Narrator output goes straight to the Broadcast page, so a
             non-cleared draft must not be narrated.
 
+            Concurrency: when `audit_id` is provided the tool first
+            attempts an atomic claim on the audit's
+            `narration_dispatched` flag (Day-6 dedup fix). If the audit
+            was already claimed by a concurrent think cycle the tool
+            returns `{status: 'already_dispatched'}` WITHOUT invoking
+            the Narrator — preventing the duplicate-published_stories
+            race observed when two cycles overlap on a long TTS call.
+
             Args:
                 story_draft_id: id of the cleared draft (the
                     `dispatch_storyteller` tool's return dict surfaces
@@ -299,16 +307,17 @@ class EditorAgent:
                     doc that authorized this narration. When provided,
                     the Narrator carries the audit's NIL signature
                     (claims_checked / softened / removed) into the
-                    `published_stories` doc, and the Editor stamps
-                    `narration_dispatched=True` on the audit so the
-                    next think cycle does not re-dispatch the same
-                    cleared audit.
+                    `published_stories` doc, and the Editor atomically
+                    claims the audit (sets `narration_dispatched=True`
+                    BEFORE invoking the Narrator) so the next think
+                    cycle does not re-dispatch the same cleared audit.
 
             Returns:
-                `{dispatched, manifest?, error?}`. On failure (no
-                narrator, firestore unavailable, draft missing, draft
-                not cleared) `dispatched=false` and `error` describes
-                why.
+                `{dispatched, manifest?, error?}` on success / soft
+                failure paths. When `audit_id` is provided and another
+                think cycle already claimed the audit, returns
+                `{status: 'already_dispatched', audit_id}` and does not
+                invoke the Narrator.
             """
             if narrator is None:
                 logger.warning(
@@ -325,6 +334,23 @@ class EditorAgent:
                     "story_draft_id": story_draft_id,
                     "error": "firestore unavailable",
                 }
+            # Atomically claim the audit BEFORE doing any other work. If
+            # a concurrent dispatch already won, abort cleanly so we
+            # never invoke narrator.narrate() twice (which would write
+            # two `published_stories` docs for the same draft).
+            if audit_id:
+                claimed = await self._claim_audit_for_narration(audit_id)
+                if not claimed:
+                    logger.info(
+                        "editor.dispatch_narrator: audit %s already claimed; skipping",
+                        audit_id,
+                    )
+                    return {
+                        "status": "already_dispatched",
+                        "dispatched": False,
+                        "story_draft_id": story_draft_id,
+                        "audit_id": audit_id,
+                    }
             logger.info(
                 "editor.dispatch_narrator: story_draft_id=%s voice=%s",
                 story_draft_id, voice_profile,
@@ -374,11 +400,11 @@ class EditorAgent:
                 voice_profile=resolved_voice,
                 audit_id=audit_id,
             )
-            # If the Editor was driven by a cleared `publish_audits` doc,
-            # mark it as narration_dispatched so the next think cycle's
-            # context snapshot doesn't re-surface it.
-            if audit_id:
-                await self._mark_audit_narration_dispatched(audit_id)
+            # The audit's `narration_dispatched=True` flag was already
+            # written at claim time, so we do NOT call
+            # `_mark_audit_narration_dispatched` here — that path is
+            # now only invoked as a defensive idempotent fallback if
+            # ever needed by a future code path.
             return {
                 "dispatched": True,
                 "story_draft_id": story_draft_id,
@@ -973,6 +999,153 @@ class EditorAgent:
                 "editor: read_cleared_audits_awaiting_narration: query failed"
             )
             return []
+
+    async def _claim_audit_for_narration(self, audit_id: str) -> bool:
+        """Atomically check `narration_dispatched=False` and set to True.
+
+        Returns True iff THIS call claimed the audit; False if it was
+        already claimed by a concurrent dispatch (or if the audit doc
+        cannot be found). Day-6 dedup fix: previously the
+        `narration_dispatched` flag was set AFTER `narrator.narrate()`
+        completed (a 30+ second TTS call), giving a second think cycle
+        time to read the audit as un-claimed and dispatch a duplicate
+        Narrator. Setting the flag BEFORE narration via this claim
+        closes the race.
+
+        Implementation notes — works against both the production
+        google-cloud-firestore async client AND the in-memory test stub:
+
+        - Production path: prefers a Firestore transaction
+          (`async_transactional` read-check-set on the audit's doc id).
+          Resolves the doc id via `where('audit_id', '==', audit_id)`
+          since `audit_id` is a UUID-hex field, not the auto-generated
+          Firestore doc id.
+        - Stub / fallback path: a direct read-check-set against the
+          collection. Naturally atomic in single-thread asyncio because
+          neither the stub's `.get()` nor `.update()` await between
+          read and write — there is no interleaving point for a
+          concurrent task to slip in.
+
+        Best-effort: any unexpected Firestore failure returns True so
+        the dispatch chain still proceeds (defense in depth — losing
+        the dedup guard is preferable to losing a story silently).
+        """
+        if self._firestore is None or not hasattr(self._firestore, "collection"):
+            # Local / stub-less mode — no race possible.
+            return True
+        try:
+            coll = self._firestore.collection("publish_audits")
+        except Exception:
+            return True
+
+        # Resolve the Firestore doc id from the `audit_id` field. The
+        # PublishGate writes audits via `coll.add(...)`, so the doc id
+        # is auto-generated and the audit_id lives in the body.
+        target_doc_id = await self._resolve_audit_doc_id(coll, audit_id)
+        if target_doc_id is None:
+            logger.info(
+                "editor._claim_audit_for_narration: audit %s not found",
+                audit_id,
+            )
+            return False
+
+        payload = {
+            "narration_dispatched": True,
+            "narration_dispatched_at": datetime.now(timezone.utc).isoformat(),
+            "narration_dispatched_via": "editor.dispatch_narrator",
+        }
+
+        # Production path: Firestore transaction (real async client).
+        try:
+            from google.cloud import firestore as _firestore_lib  # type: ignore[import-untyped]
+            transaction_factory = getattr(self._firestore, "transaction", None)
+            async_transactional = getattr(
+                _firestore_lib, "async_transactional", None
+            )
+            if callable(transaction_factory) and callable(async_transactional):
+                doc_ref = coll.document(target_doc_id)
+
+                @async_transactional
+                async def _claim(tx, ref):
+                    snap = await tx.get(ref)
+                    if not getattr(snap, "exists", False):
+                        return False
+                    data = snap.to_dict() or {}
+                    if data.get("narration_dispatched", False) is True:
+                        return False
+                    tx.update(ref, payload)
+                    return True
+
+                transaction = transaction_factory()
+                return bool(await _claim(transaction, doc_ref))
+        except Exception:
+            logger.debug(
+                "editor._claim_audit_for_narration: transaction path "
+                "unavailable; falling back to read-check-set",
+                exc_info=True,
+            )
+
+        # Stub / fallback: read-check-set without await between steps.
+        try:
+            doc_ref = coll.document(target_doc_id)
+            snapshot = doc_ref.get() if hasattr(doc_ref, "get") else None
+            if asyncio.iscoroutine(snapshot) or hasattr(snapshot, "__await__"):
+                snapshot = await snapshot
+            if snapshot is None or not getattr(snapshot, "exists", False):
+                return False
+            data = snapshot.to_dict() if hasattr(snapshot, "to_dict") else {}
+            if (data or {}).get("narration_dispatched", False) is True:
+                return False
+            if hasattr(doc_ref, "update"):
+                res = doc_ref.update(payload)
+                if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                    await res
+                return True
+        except Exception:
+            logger.exception(
+                "editor._claim_audit_for_narration: fallback claim failed for %s",
+                audit_id,
+            )
+            # Defense in depth — return True so dispatch still proceeds.
+            return True
+        return False
+
+    async def _resolve_audit_doc_id(self, coll: Any, audit_id: str) -> str | None:
+        """Best-effort lookup: `audit_id` field → Firestore doc id.
+
+        Tries a `where('audit_id', '==', audit_id)` query first (real
+        client); falls back to a full-collection scan (the test stub
+        ignores `where`).
+        """
+        # Query path (real client honors where()).
+        try:
+            q = coll
+            if hasattr(coll, "where"):
+                try:
+                    from google.cloud.firestore_v1 import FieldFilter  # type: ignore[import-untyped]
+                    q = coll.where(filter=FieldFilter("audit_id", "==", audit_id))
+                except Exception:
+                    q = coll.where("audit_id", "==", audit_id)
+                if hasattr(q, "limit"):
+                    q = q.limit(1)
+            stream = q.stream() if hasattr(q, "stream") else []
+            if hasattr(stream, "__aiter__"):
+                async for d in stream:
+                    data = _doc_to_dict(d)
+                    if data.get("audit_id") == audit_id:
+                        return getattr(d, "id", None) or data.get("id")
+            else:
+                for d in stream:
+                    data = _doc_to_dict(d)
+                    if data.get("audit_id") == audit_id:
+                        return getattr(d, "id", None) or data.get("id")
+        except Exception:
+            logger.debug(
+                "editor._resolve_audit_doc_id: scan failed for %s",
+                audit_id,
+                exc_info=True,
+            )
+        return None
 
     async def _mark_audit_narration_dispatched(self, audit_id: str) -> None:
         """Stamp `narration_dispatched=True` on the cleared audit so the
