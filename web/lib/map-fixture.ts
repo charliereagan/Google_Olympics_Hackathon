@@ -129,6 +129,26 @@ function buildPlace(node: FieldNode): MapPlace {
   };
 }
 
-export const MAP_PLACES: MapPlace[] = FIELD_NODES
-  .filter((n) => COORDS[n.id])
-  .map(buildPlace);
+// Organic-story dots that don't correspond to a single FieldNode are appended
+// here. The Minnesota state-league story (organic-CcBLDJv0y0mLzmWpQF5W) is
+// editorial state-wide — its place markers name Robbinsdale, Golden Valley,
+// and Marshall — so we pin it at the Twin Cities metro centroid where the
+// state league's operational center sits (and which contains the first two
+// named suburbs). Submission day 2026-05-11.
+const ORGANIC_PLACES: MapPlace[] = [
+  {
+    id: 'twin-cities-mn',
+    name: 'Twin Cities · Minnesota',
+    state: 'Minnesota',
+    count: 8,
+    lat: 44.978,
+    lng: -93.265,
+    story_id: 'organic-CcBLDJv0y0mLzmWpQF5W',
+    headline: 'A state league builds a thirty-year tradition.',
+  },
+];
+
+export const MAP_PLACES: MapPlace[] = [
+  ...FIELD_NODES.filter((n) => COORDS[n.id]).map(buildPlace),
+  ...ORGANIC_PLACES,
+];
