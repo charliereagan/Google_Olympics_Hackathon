@@ -198,6 +198,99 @@ export const STORY_INFOGRAPHICS: Record<string, StoryInfographic> = {
       },
     ],
   },
+  // Birmingham, Alabama — fixture story, south-side adaptive-sports
+  // training campus + city infrastructure pattern. Paralympic-anchored.
+  // Authored from the fixture prose body and `claims` slugs in
+  // story-fixture.ts (campus_continuous_since_1980s,
+  // accessibility_retrofit_1993, first_paralympian_1996,
+  // greenway_connector_2006, low_floor_bus_route_2014,
+  // paralympian_to_olympian_ratio). VPS skipped this entry in
+  // Docs/VPS/story-infographic-data.md; HoE authored 2026-05-11 from the
+  // claims-verified prose so all 4 homepage stories carry treatment.
+  'fixture-birmingham-alabama': {
+    sport_tags: [
+      'adaptive cycling',
+      'wheelchair rugby',
+      'paratriathlon',
+      'sled hockey',
+      'Paralympic',
+    ],
+    big_numbers: [
+      {
+        value: '5 AM',
+        label:
+          'The bus route, the swim block, the door rolling up — the time the campus begins, every day',
+      },
+      {
+        value: '120',
+        label:
+          'City blocks of accessibility retrofit committed by Birmingham in 1993',
+      },
+      {
+        value: '3',
+        label:
+          'Paralympians produced per Olympian — the inverse of the national ratio',
+      },
+    ],
+    timeline: [
+      {
+        year: 'late 1980s',
+        label:
+          'South-side adaptive-sports training campus enters continuous operation',
+      },
+      {
+        year: '1993',
+        label:
+          'City of Birmingham commits to a multi-decade accessibility retrofit across 120 city blocks',
+      },
+      {
+        year: '1996',
+        label: 'First Paralympian from the program comes home',
+      },
+      {
+        year: '2006',
+        label:
+          'Wheelchair-accessible greenway opens, connecting the campus to the medical district',
+      },
+      {
+        year: '2014',
+        label:
+          'Low-floor public bus route to the campus begins, 20-minute headway from 5 a.m.',
+      },
+    ],
+    place_markers: [
+      {
+        place: 'South-side training campus, Birmingham',
+        role:
+          '40-acre facility · hardwood, indoor track, cycling loop, swimming pool, strength room',
+      },
+      {
+        place: 'Birmingham–Medical District greenway',
+        role:
+          'Wheelchair-accessible greenway connector since 2006 · roughly four miles',
+      },
+      {
+        place: 'Birmingham–Jefferson County Transit Authority',
+        role:
+          'Public transit operating the 5 a.m. low-floor bus route to the training campus since 2014',
+      },
+    ],
+    resources: [
+      {
+        label: 'City of Birmingham, Alabama · official city government',
+        url: 'https://www.birminghamal.gov/',
+      },
+      {
+        label:
+          'MAX Transit (Birmingham–Jefferson County Transit Authority) · regional public transit',
+        url: 'https://maxtransit.org/',
+      },
+      {
+        label: 'Olympedia · Paralympic results archive',
+        url: 'https://www.olympedia.org',
+      },
+    ],
+  },
   // Park City, Utah — fixture story, winter mountain town anchored to
   // the Olympic Winter Games Salt Lake City 2002 legacy. VPS Session 2
   // data, §3 of Docs/VPS/story-infographic-data.md. (VPS flagged the
