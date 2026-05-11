@@ -36,7 +36,11 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 3600;
 
 const HEARTBEAT_MS = 15_000; // Per BUILD_SPEC §4 — defeat idle proxy timeouts.
-const PRE_SEED_LIMIT = 6;    // Per BUILD_SPEC §6.9 — first-paint window.
+const PRE_SEED_LIMIT = 6;    // Per BUILD_SPEC §6.9 — first-paint window (wire_events).
+// Per Day-11: hand the Floor a much deeper handoff buffer so paced playback
+// (HANDOFF_PACE_MS on the client) keeps the room alive for ~3 min before the
+// idle-replay loop has to recycle. Wire feed stays at PRE_SEED_LIMIT.
+const HANDOFF_PRE_SEED_LIMIT = 120;
 // Per Day-10 D7: clamp the live feed to the last hour so multi-day stale
 // rows (and pre-Day-7 over-redacted events) never hit the wire UI.
 const LIVE_WINDOW_MS = 60 * 60 * 1000;
@@ -156,19 +160,28 @@ export async function GET(req: NextRequest) {
         send('preseed-error', { message: String(err) });
       }
 
-      // -- 1b. PRE-SEED: last 6 agent_handoffs replay/published (BUILD_SPEC §9.6) ---
+      // -- 1b. PRE-SEED: last 120 agent_handoffs across ALL modes
+      // (BUILD_SPEC §9.6). The Floor's client-side paced queue feeds these
+      // through at HANDOFF_PACE_MS so the agent graph stays alive whether
+      // or not the runtime is currently emitting fresh handoffs. We drop the
+      // `where('mode', 'in', [...])` clause so the query is single-field
+      // orderBy and auto-indexed by Firestore — no composite index needed.
+      // CONSTITUTION Rule 3 is satisfied client-side: the Floor labels the
+      // canvas REPLAY · RECORDED OPERATION whenever it is consuming from
+      // its replay log instead of a fresh live tail.
+      const preseededHandoffIds = new Set<string>();
       try {
         const handoffSeedSnap = await db
           .collection('agent_handoffs')
-          .where('mode', 'in', ['replay', 'published'])
           .orderBy('timestamp', 'desc')
-          .limit(PRE_SEED_LIMIT)
+          .limit(HANDOFF_PRE_SEED_LIMIT)
           .get();
 
         const handoffSeedDocs = handoffSeedSnap.docs.slice().reverse();
         for (const doc of handoffSeedDocs) {
           const data = doc.data();
           if (!data) continue;
+          preseededHandoffIds.add(doc.id);
           const handoff: AgentHandoff = {
             id: doc.id,
             ...(data as Omit<AgentHandoff, 'id'>),
@@ -252,6 +265,9 @@ export async function GET(req: NextRequest) {
             for (const change of snap.docChanges()) {
               // Handoffs are append-only; ignore modified / removed.
               if (change.type !== 'added') continue;
+              // Skip docs we already emitted via preseed so the Floor's
+              // paced queue doesn't double-count them in its replay buffer.
+              if (preseededHandoffIds.has(change.doc.id)) continue;
               const handoff: AgentHandoff = {
                 id: change.doc.id,
                 ...(change.doc.data() as Omit<AgentHandoff, 'id'>),

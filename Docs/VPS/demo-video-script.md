@@ -13,17 +13,17 @@
 |---|---|---|---|
 | Opener | 0:00–0:04 | Black | *"Every Team USA athlete comes from somewhere."* |
 | Front door reveal | 0:04–0:12 | Fade up on `/` — masthead, hero of Minnesota (or Mount Pleasant), ambient Wire ticker scrolling, seed-prompt CTA visible | *"We built an AI newsroom that finds those places."* |
-| The fan path | 0:12–0:30 | Cursor moves through `/` — hover over discovery row (Map / Field / Stories), brief tab to `/map` showing US place dots | *"The protagonists aren't the famous names. They're the towns, the programs, the patterns that quietly produce Team USA. And the room finds them whether you're watching or not."* |
-| Click hero | 0:30–0:38 | Click Mount Pleasant (or Minnesota) hero. Curtain rise. Hero illustration fades in, headline character-by-character, music bed enters, Narrator breath audible. | *Silence — let the curtain rise land.* |
-| The Broadcast | 0:38–1:30 | Mount Pleasant Broadcast page playing. Algenib narration audio at full level. Sentence highlighting. Hero image Ken Burns motion. Infographic block visible as Charlie scrolls. | *Silence — Algenib's recorded narration plays directly. ~55s of documentary register.* |
-| The dual-mode framing | 1:30–1:50 | Scroll the Broadcast down to the verified-claims drawer and audit footer. Tab to `/publish-gate`. | *"These pages are for fans. And these — the Wire, the Floor, the Gate — are where the room shows its work."* |
-| The trust artifact | 1:50–2:10 | `/publish-gate` page. Numbers visible (~847 claims · 112 redactions · 39 disambiguations). Recent decisions table scrolling. Mount Pleasant disambiguation trace expands. | *"Eleven thousand athletes in a registry. Every text the room produces — scanned. Direct matches redacted. Near-identifications returned. The Layer's reasoning, shown in full."* |
-| The agentic claim | 2:10–2:35 | Tab to `/floor`. Seven agent nodes lit. Particle handoffs flowing. Tool call cards stacking bottom-right. **PIP cutaway at 2:20 to GCP console / AI Studio (VPS-DEC-037).** Return to /floor at 2:25. | *"Seven Gemini agents. Five Gemini models working in concert — Pro for deliberation, Flash for the parallel scouts, Flash-Lite for utility, Deep Research for the hard ones, Flash TTS for the Narrator's voice."* |
-| The interactive moment | 2:35–2:52 | Back to `/`. Cursor moves to the seed-prompt CTA. Types *"Find me a Team USA hometown story I've never heard before"*. Click submit. Routes to `/investigation/[id]` — compressed-time live stream of agents thinking, scoring, handing off. | *"And any fan can ask the room to find one for them. Watch it work in real time."* |
+| The fan path | 0:12–0:30 | Cursor moves through `/` — hover over discovery row (Map / Field / Stories), brief tab to `/map` showing US place dots | *"The protagonists aren't the famous names. They're the towns, the programs, the patterns that quietly produce Team USA — and a working room of seven Gemini agents finds them, whether you're watching or not."* |
+| Click hero | 0:30–0:38 | Click Minnesota (or Mount Pleasant) hero. Curtain rise. Hero illustration fades in, headline character-by-character, music bed enters, Narrator breath audible. | *Silence — let the curtain rise land.* |
+| The Broadcast | 0:38–1:30 | Minnesota (or Mount Pleasant) Broadcast page playing. Algenib narration audio at full level. Sentence highlighting. Hero image Ken Burns motion. Infographic block visible as Charlie scrolls. | *Silence — Algenib's recorded narration plays directly. ~55s of documentary register.* |
+| The dual-mode framing | 1:30–1:50 | Scroll the Broadcast down to the verified-claims drawer and audit footer. Tab to `/publish-gate`. | *"These pages are for fans. And these — the Wire, the Floor, the Gate — are where the agents show their work."* |
+| The trust artifact | 1:50–2:10 | `/publish-gate` page. Numbers visible (~847 claims · 112 redactions · 39 disambiguations). Recent decisions table scrolling. Mount Pleasant disambiguation trace expands. | *"The contest forbids naming any individual athlete. We used the Agent Development Kit to make compliance architecture: the NIL Redaction Layer sits between the Storyteller agent and any reader. Eleven thousand athletes in a registry. Every text the agents produce — scanned. Architecture, not afterthought."* |
+| The agentic claim | 2:10–2:35 | Tab to `/floor`. Seven agent nodes lit. Particle handoffs flowing. Tool call cards stacking bottom-right. **PIP cutaway at 2:20 to GCP console / AI Studio (VPS-DEC-037).** Return to /floor at 2:25. | *"Seven Gemini agents, built on Google's Agent Development Kit — the new Gemini Enterprise Agent Platform. Five Gemini models in concert: Pro for deliberation, Flash for the parallel scouts, Flash-Lite for utility, Deep Research for the hard ones, Flash TTS for the Narrator's voice. Nano Banana Pro for every hero illustration. The year of agents — fully on display."* |
+| The interactive moment | 2:35–2:52 | Back to `/`. Cursor moves to the seed-prompt CTA. Types *"Find me a Team USA hometown story I've never heard before"*. Click submit. Routes to `/investigation/[id]` — compressed-time live stream of agents thinking, scoring, handing off. | *"And any fan can ask the agents to find one for them. Watch them work in real time."* |
 | The close | 2:52–2:58 | Cut from `/investigation/[id]` back to the front door's ambient Wire ticker, still scrolling. | *"Right now — the room is finding the next one."* |
-| Hard cut | 2:58–3:00 | Cut to black. Single line of white text, centered: *"The Storyteller's Room. Built on Google Cloud."* | *Silence. Music bed last beat, fade out.* |
+| Hard cut | 2:58–3:00 | Cut to black. Single line of white text, centered: *"The Storyteller's Room. Built on the Gemini Enterprise Agent Platform."* | *Silence. Music bed last beat, fade out.* |
 
-**Total Charlie voiceover word count:** ~150 words. Documentary pace (~120 wpm). About 75 seconds of voiceover spread across 180 seconds — leaves space for the Broadcast narration play (55s), the curtain rise (8s), the seed-prompt-to-investigation pause (~12s), and the silent close (2s).
+**Total Charlie voiceover word count:** ~200 words. Documentary pace (~120 wpm). About 95–100 seconds of voiceover spread across 180 seconds — leaves space for the Broadcast narration play (~55s), the curtain rise (8s), the seed-prompt-to-investigation pause (~10s), and the silent close (2s). If timing runs long during recording, the longest cuttable segments are the *"Nano Banana Pro for every hero illustration"* clause at 2:10 and the *"And these — the Wire, the Floor, the Gate"* parenthetical at 1:30.
 
 ---
 
@@ -36,27 +36,27 @@
 > We built an AI newsroom that finds those places.
 >
 > **(0:12, cursor exploring the discovery row)**
-> The protagonists aren't the famous names. They're the towns, the programs, the patterns that quietly produce Team USA. And the room finds them — whether you're watching or not.
+> The protagonists aren't the famous names. They're the towns, the programs, the patterns that quietly produce Team USA — and a working room of seven Gemini agents finds them, whether you're watching or not.
 >
 > **(0:30, click hero — pause through curtain rise)**
 > *[silence — 8 seconds of curtain rise]*
 >
 > **(0:38–1:30, Algenib narration plays from the Broadcast page)**
-> *[silence — Algenib delivers ~55 seconds of Mount Pleasant narration]*
+> *[silence — Algenib delivers ~55 seconds of narration]*
 >
 > **(1:30, scroll down to audit footer, tab to /publish-gate)**
-> These pages are for fans. And these — the Wire, the Floor, the Gate — are where the room shows its work.
+> These pages are for fans. And these — the Wire, the Floor, the Gate — are where the agents show their work.
 >
 > **(1:50, on /publish-gate)**
-> Eleven thousand athletes in a registry. Every text the room produces — scanned. Direct matches redacted. Near-identifications returned. The Layer's reasoning, shown in full.
+> The contest forbids naming any individual athlete. We used the Agent Development Kit to make compliance architecture: the NIL Redaction Layer sits between the Storyteller agent and any reader. Eleven thousand athletes in a registry. Every text the agents produce — scanned. Architecture, not afterthought.
 >
 > **(2:10, tab to /floor — particles flowing)**
-> Seven Gemini agents. Five Gemini models working in concert — Pro for deliberation, Flash for the parallel scouts, Flash-Lite for utility, Deep Research for the hard ones, Flash TTS for the Narrator's voice.
+> Seven Gemini agents, built on Google's Agent Development Kit — the new Gemini Enterprise Agent Platform. Five Gemini models in concert: Pro for deliberation, Flash for the parallel scouts, Flash-Lite for utility, Deep Research for the hard ones, Flash TTS for the Narrator's voice. Nano Banana Pro for every hero illustration. The year of agents — fully on display.
 >
 > *[2:20–2:25: brief PIP cutaway to GCP console / AI Studio; voice continues over]*
 >
 > **(2:35, back to /, type the seed prompt)**
-> And any fan can ask the room to find one for them. Watch it work in real time.
+> And any fan can ask the agents to find one for them. Watch them work in real time.
 >
 > **(2:50–2:58, /investigation/[id] streams, then cut back to Wire)**
 > Right now — the room is finding the next one.
@@ -83,7 +83,7 @@
 - **1:30 transition** — clean tab switch to `/publish-gate`. No animations between routes; just a fast tab. Music bed continues, ducked slightly for the voiceover.
 - **2:20–2:25 — the GCP console PIP cutaway.** Picture-in-picture, lower-third, ~2 seconds. Show *one of:* the Cloud Run service list with `agent-runtime` and `web` running in `us-central1`, OR Vertex AI Studio with one of the agent system prompts visible, OR a code editor with `prompts/storyteller.md` open. Pick whichever looks cleanest. **Avoid:** any browser tab showing third-party logos in bookmark bars, any notification badges, any other Cloud projects beyond this one.
 - **2:35–2:50 — the interactive moment.** Charlie types the seed prompt slowly enough for a viewer to read it (~3 seconds to type). Hit submit. Cut to `/investigation/[id]`. The compressed-time investigation stream plays for ~10 seconds — long enough for the judge to see Scout → Investigator → Editor handoffs happening live. Don't rush it.
-- **2:58 — the hard cut.** No fade. Cut to black. White text appears: *"The Storyteller's Room. Built on Google Cloud."* in Playfair Display, centered. Holds 2 seconds. End.
+- **2:58 — the hard cut.** No fade. Cut to black. White text appears: *"The Storyteller's Room. Built on the Gemini Enterprise Agent Platform."* in Playfair Display, centered. Holds 2 seconds. End.
 
 ### Audio mix
 

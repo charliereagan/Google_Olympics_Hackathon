@@ -38,6 +38,7 @@ import { useWireStream } from '@/lib/wire-stream-client';
 import { WireRow } from '@/components/WireRow';
 import { getStreamingProfile } from '@/lib/streaming-profiles';
 import type { WireEvent } from '@/lib/wire-event';
+import { matchesWireFilter, type WireFilterId } from '@/lib/agent-models';
 
 // design-system.md §5.3 — the room's signature easing curve.
 const ROOM_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
@@ -47,8 +48,16 @@ const ROOM_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
 // they can read older events without being yanked.
 const AT_BOTTOM_THRESHOLD_PX = 48;
 
-export default function WireFeed() {
-  const { events, state } = useWireStream();
+export interface WireFeedProps {
+  /** Optional agent filter — controls which events render. URL-driven on /wire. */
+  agentFilter?: WireFilterId;
+}
+
+export default function WireFeed({ agentFilter = 'all' }: WireFeedProps = {}) {
+  const { events: allEvents, state } = useWireStream();
+  const events = agentFilter === 'all'
+    ? allEvents
+    : allEvents.filter((ev) => matchesWireFilter(agentFilter, ev.agent, ev.sub_agent));
   const reduceMotion = useReducedMotion();
 
   // Pin newest-arrival auto-scroll to "user is at bottom".

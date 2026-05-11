@@ -20,7 +20,12 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import type { AgentHandoffEvent } from '@/lib/agent-floor-fixture';
-import { AGENT_BY_ID, toolDisplayName, EQUITY_INTERVENE_TOOL_CALL } from '@/lib/agent-floor-fixture';
+import {
+  AGENT_BY_ID,
+  EQUITY_INTERVENE_TOOL_CALL,
+  gcpServiceLabel,
+  toolDisplayName,
+} from '@/lib/agent-floor-fixture';
 
 const ROOM_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
 
@@ -52,6 +57,16 @@ export function ToolCallCard({ handoff }: ToolCallCardProps) {
       ? from.rgb
       : '212, 168, 74';
 
+  // VPS-DEC-037 § "Tool call cards — cleanly labeled" (2026-05-11): the
+  // card's top line names the actual Google service in use (e.g.
+  // "VERTEX AI · GEMINI 3.1 PRO"), the second line names the
+  // originating agent + the operation verb ("Editor → deliberation"),
+  // the body line carries the status copy. Top-line gold reads as a
+  // tracked-cap broadcast credit — what built this story — not a
+  // SaaS card title.
+  const service = gcpServiceLabel(handoff.tool_call_id, handoff.from_agent);
+  const operation = toolDisplayName(handoff.tool_call_id);
+
   return (
     <motion.div
       layout
@@ -61,14 +76,14 @@ export function ToolCallCard({ handoff }: ToolCallCardProps) {
       transition={{ duration: 0.42, ease: ROOM_EASE }}
       className="pointer-events-auto w-full border-t border-gold-warm/60 bg-navy-mid/95 px-4 py-3 sm:w-[260px]"
       role="status"
-      aria-label={`${from.label} dispatched ${toolDisplayName(handoff.tool_call_id)} to ${to.label}`}
+      aria-label={`${service} — ${from.label} dispatched ${operation} to ${to.label}`}
     >
       <div className="flex items-center justify-between">
         <p
-          className="font-mono text-mono-sm uppercase text-cream"
-          style={{ letterSpacing: '0.14em' }}
+          className="font-mono text-mono-sm uppercase text-gold-warm"
+          style={{ letterSpacing: '0.16em' }}
         >
-          {toolDisplayName(handoff.tool_call_id)}
+          {service}
         </p>
         <span
           aria-hidden="true"
@@ -83,11 +98,18 @@ export function ToolCallCard({ handoff }: ToolCallCardProps) {
           }}
         />
       </div>
-      <p className="mt-1.5 font-mono text-caption uppercase text-slate-room" style={{ letterSpacing: '0.16em' }}>
-        {from.label} <span className="text-gold-warm/70">·</span> {to.label}
+      <p
+        className="mt-1.5 font-mono text-caption uppercase text-parchment/90"
+        style={{ letterSpacing: '0.14em' }}
+      >
+        {from.label} <span className="text-gold-warm/70">→</span> {operation}
       </p>
       <p className="mt-2 font-body text-body-sm text-wire-text">
-        {status === 'running' ? 'dispatching…' : isIntervention ? 'parity hold — feed drift caught' : 'handoff complete'}
+        {status === 'running'
+          ? 'dispatching…'
+          : isIntervention
+            ? 'parity hold — feed drift caught'
+            : `handoff complete · ${to.label.toLowerCase()}`}
       </p>
     </motion.div>
   );

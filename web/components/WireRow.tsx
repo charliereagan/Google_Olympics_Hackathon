@@ -22,6 +22,7 @@
 
 import { motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { getAgentAttribution } from '@/lib/agent-models';
 
 // ---------------------------------------------------------------------------
 // Types — mirror agents/wire/types.py (TypedDict WireEvent)
@@ -400,10 +401,31 @@ export function WireRow(props: WireEventProps) {
             │
           </span>
 
-          {/* Agent name — Lora italic */}
-          <span className="font-italic italic text-italic-sm text-cream truncate">
-            {AGENT_DISPLAY_NAMES[agent]}
-          </span>
+          {/* Agent name + Gemini model attribution. Per the VPS treatment
+              for /wire (Addition 3): every event renders its agent name in
+              italic-Lora cream followed by the static Gemini model in mono
+              caps parentheses. The model parenthetical is rendered in
+              text-wire-time so it reads as visibly subordinate to the name
+              but stays legible — the cumulative effect across a long feed
+              is a visible Gemini-API-attribution receipt on every line.
+              Static mapping, NOT synthesized per event (see web/lib/agent-models.ts). */}
+          {(() => {
+            const { name, model } = getAgentAttribution(agent, sub_agent);
+            return (
+              <>
+                <span className="font-italic italic text-italic-sm text-cream truncate">
+                  {name}
+                </span>
+                <span
+                  className="font-mono text-mono-sm uppercase text-wire-time whitespace-nowrap"
+                  style={{ letterSpacing: '0.06em' }}
+                  aria-label={`Backed by ${model}`}
+                >
+                  ({model})
+                </span>
+              </>
+            );
+          })()}
         </div>
 
         {/* Message-type tag — small caps, slate-room, tracked */}
@@ -422,25 +444,11 @@ export function WireRow(props: WireEventProps) {
         </span>
       </div>
 
-      {/* ---- Sub-agent name (recessed under parent) --------------------- */}
-      {/* Indent matches body (responsive per design-system.md §4): 16px /
-          20px / 24px at sm / md+ — keeps the sub-scout grouping aligned
-          with its body at every viewport. */}
-      {sub_agent && (
-        <div className="mt-0.5 pl-4 sm:pl-5 md:pl-6">
-          <span
-            className={[
-              'font-body',
-              'text-caption',
-              'uppercase',
-              'tracking-[0.18em]',
-              'text-slate-room',
-            ].join(' ')}
-          >
-            {SUB_AGENT_DISPLAY_NAMES[sub_agent]}
-          </span>
-        </div>
-      )}
+      {/* Sub-agent block intentionally removed: now that the agent header
+          renders "Cinderella Scout (Gemini 3 Flash)" directly via
+          getAgentAttribution(agent, sub_agent), repeating the sub-agent
+          name on a second line would be duplicative. The body indent
+          (pl-4/5/6) still preserves the sub-scout grouping rhythm. */}
 
       {/* ---- Hairline rule — 1px gold-warm/80, 80% width ---------------- */}
       <div

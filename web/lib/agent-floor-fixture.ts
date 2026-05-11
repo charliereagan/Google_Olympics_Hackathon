@@ -108,6 +108,80 @@ export function toolDisplayName(id: string): string {
   return TOOL_DISPLAY_NAMES[id] ?? id.replace(/_/g, ' ');
 }
 
+// VPS-DEC-037 § "Tool call cards — cleanly labeled" (2026-05-11):
+// every tool-call card's top line must name the actual Google service in
+// use, not the internal handoff verb. This mapping converts a handoff's
+// `tool_call_id` into a `SERVICE · MODEL` (or `SERVICE · TABLE`) string
+// that a judge can read at a glance. Falls back to VERTEX AI · GEMINI
+// 3.1 PRO — the dominant deliberation path — when the id is unknown
+// (Editor / Storyteller / Investigator / Equity / Publish Gate
+// deliberation cycles all hit Gemini 3.1 Pro on Vertex AI, per the
+// dispatch tools in `agents/handoffs.py`).
+export function gcpServiceLabel(toolCallId: string, fromAgent?: AgentId): string {
+  // Direct matches — explicit operations whose service is unambiguous.
+  switch (toolCallId) {
+    case 'dispatch_scout_desk':
+      return 'VERTEX AI · GEMINI 3 FLASH';
+    case 'request_narrator':
+      return 'VERTEX AI · GEMINI 3.1 FLASH TTS';
+    case 'nano_banana_pro':
+      return 'VERTEX AI · NANO BANANA PRO';
+    case 'gemini_search_grounding':
+      return 'GEMINI · GOOGLE SEARCH GROUNDING';
+    case 'nil_redaction_layer':
+      return 'NIL REDACTION LAYER · SCAN';
+    case 'intervene_feed_drift':
+    case 'request_equity_review':
+      // Equity Editor deliberation is a Gemini 3.1 Pro call.
+      return 'VERTEX AI · GEMINI 3.1 PRO';
+    case 'request_publish_gate':
+      return 'VERTEX AI · GEMINI 3.1 PRO';
+    case 'dispatch_storyteller':
+    case 'dispatch_investigator':
+      return 'VERTEX AI · GEMINI 3.1 PRO';
+    case 'bigquery_candidates':
+      return 'BIGQUERY · CANDIDATES';
+    default:
+      break;
+  }
+
+  // Pattern matches — for handoff ids that aren't in the registry.
+  if (toolCallId.startsWith('bigquery_')) {
+    const table = toolCallId.slice('bigquery_'.length).toUpperCase();
+    return `BIGQUERY · ${table}`;
+  }
+  if (toolCallId.startsWith('firestore_read_')) {
+    const collection = toolCallId.slice('firestore_read_'.length).toUpperCase();
+    return `FIRESTORE · ${collection} · READ`;
+  }
+  if (toolCallId.startsWith('firestore_write_')) {
+    const collection = toolCallId.slice('firestore_write_'.length).toUpperCase();
+    return `FIRESTORE · ${collection} · WRITE`;
+  }
+  if (toolCallId.includes('deep_research')) {
+    return 'VERTEX AI · GEMINI DEEP RESEARCH';
+  }
+  if (toolCallId.includes('flash_lite') || toolCallId.includes('near_id')) {
+    return 'VERTEX AI · GEMINI 3.1 FLASH-LITE';
+  }
+  if (toolCallId.includes('visual_review')) {
+    return 'VISUAL REVIEW · STYLIZATION CHECK';
+  }
+
+  // Scout-desk-originated handoffs that aren't named explicitly default to
+  // the parallel-Flash scout cycle path.
+  if (fromAgent === 'scout_desk') {
+    return 'VERTEX AI · GEMINI 3 FLASH';
+  }
+  // Narrator-originated handoffs default to the TTS render path.
+  if (fromAgent === 'narrator') {
+    return 'VERTEX AI · GEMINI 3.1 FLASH TTS';
+  }
+
+  // Fallback: the dominant deliberation path.
+  return 'VERTEX AI · GEMINI 3.1 PRO';
+}
+
 // Stable lookup keyed by agent id. Frozen so callers can't mutate.
 export const AGENT_BY_ID: Readonly<Record<AgentId, AgentNode>> = Object.freeze(
   Object.fromEntries(AGENT_NODES.map((n) => [n.id, n])) as Record<AgentId, AgentNode>,

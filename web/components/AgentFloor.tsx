@@ -28,6 +28,59 @@ import {
 } from '@/lib/agent-floor-fixture';
 import { ToolCallCard } from './ToolCallCard';
 
+// VPS-DEC-037 § per-agent treatment (2026-05-11): three-line caption
+// under each node. Line 1 (display name) is rendered in tracked-cap
+// parchment; line 2 (role one-liner) in mono slate; line 3 (Gemini
+// model attribution) in italic gold. Rendered as absolute-positioned
+// HTML overlays anchored to each node's pinned (fx, fy) coords — drawing
+// multi-line, multi-style labels in Canvas would re-implement type
+// layout. The overlay positions update on viewport resize, not every
+// raf tick (the d3-force charge is so weak we can treat fx/fy as
+// fixed once the sim settles).
+interface AgentCaption {
+  display: string;
+  role: string;
+  model: string;
+}
+
+const AGENT_CAPTIONS: Record<AgentId, AgentCaption> = {
+  editor: {
+    display: 'EDITOR',
+    role: 'Orchestrator',
+    model: 'Gemini 3.1 Pro',
+  },
+  scout_desk: {
+    display: 'SCOUT DESK',
+    role: '4 sub-scouts',
+    model: 'Gemini 3 Flash ×4',
+  },
+  investigator: {
+    display: 'INVESTIGATOR',
+    role: 'Source verification',
+    model: 'Gemini 3.1 Pro + Deep Research',
+  },
+  equity_editor: {
+    display: 'EQUITY EDITOR',
+    role: 'Parity enforcement',
+    model: 'Gemini 3.1 Pro',
+  },
+  storyteller: {
+    display: 'STORYTELLER',
+    role: 'Literary drafts',
+    model: 'Gemini 3.1 Pro',
+  },
+  narrator: {
+    display: 'NARRATOR',
+    role: 'Broadcast voice',
+    model: 'Gemini 3.1 Flash TTS (Algenib)',
+  },
+  publish_gate: {
+    display: 'PUBLISH GATE',
+    role: '7-stage audit',
+    model: 'Gemini 3.1 Pro + Python NIL Layer',
+  },
+};
+
 interface SimNode extends AgentNode, SimulationNodeDatum {}
 type SimLink = SimulationLinkDatum<SimNode> & { id: string };
 
@@ -52,37 +105,18 @@ const PULSE_MS = 600;             // BUILD_SPEC §9.5 — Equity Editor flash du
 const CARD_LIFETIME_MS = 3000;    // BUILD_SPEC §9.4 — cards persist ~3s after completion.
 const MAX_CARDS = 6;              // Bottom-right stack cap (mobile clamps further).
 const MAX_PARTICLES = 60;         // Backpressure: drop the oldest when exceeded.
+// Day-11 pacing: incoming handoffs (preseed OR live) land in a ref-backed
+// FIFO queue that drains one entry every HANDOFF_PACE_MS into the existing
+// visual pipeline. When the queue empties AND no fresh live event has
+// arrived in REPLAY_IDLE_MS, we copy the rolling replay log back into the
+// queue and surface the REPLAY label (CONSTITUTION Rule 3 — replay honesty).
+const HANDOFF_PACE_MS = 1500;
+const REPLAY_IDLE_MS = 60_000;
+const REPLAY_LOG_CAP = 200;
 
 // Cube ease-out — matches the BUILD_SPEC §9.6 analytical position formula.
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
-}
-
-// Manual tracked-cap label, mirroring Field.tsx's helper. Canvas 2D's
-// `letterSpacing` is experimental, so we measure each glyph and advance.
-function drawTrackedCapsLabel(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  cx: number,
-  y: number,
-  fontSizePx: number,
-  emSpacing: number,
-): void {
-  const upper = text.toUpperCase();
-  const widths: number[] = [];
-  let total = 0;
-  const advance = emSpacing * fontSizePx;
-  for (const ch of upper) {
-    const w = ctx.measureText(ch).width;
-    widths.push(w);
-    total += w + advance;
-  }
-  total -= advance; // no trailing space after the last glyph
-  let cursor = cx - total / 2;
-  for (let i = 0; i < upper.length; i += 1) {
-    ctx.fillText(upper[i]!, cursor, y);
-    cursor += widths[i]! + advance;
-  }
 }
 
 function useElementSize<T extends HTMLElement>(): [
@@ -127,6 +161,15 @@ export function AgentFloor() {
     simLinksRef.current = simLinks;
   }, [simNodes, simLinks]);
 
+  // Pinned node positions for the HTML caption overlay. Set once per
+  // resize after the sim has placed the nodes (fx/fy is the source of
+  // truth, but x/y is what gets reconciled into d3-force's internal
+  // state). React state because we re-render the overlay only when the
+  // viewport size changes, not every raf tick.
+  const [nodePositions, setNodePositions] = useState<
+    Record<AgentId, { x: number; y: number }>
+  >({} as Record<AgentId, { x: number; y: number }>);
+
   // Live particle pool — mutated in-place inside the raf loop (no React
   // state for per-frame data, per Field.tsx pattern).
   const particlesRef = useRef<Particle[]>([]);
@@ -137,6 +180,18 @@ export function AgentFloor() {
   const [cards, setCards] = useState<AgentHandoffEvent[]>([]);
   // Track per-card lifetime timeouts so we can clear on unmount.
   const cardTimeoutsRef = useRef<Map<string, number>>(new Map());
+
+  // Day-11 pacing infra. queueRef holds handoffs waiting for their slot in
+  // the visual pipeline; the dispatch interval drains the head every
+  // HANDOFF_PACE_MS. replayLogRef accumulates every handoff we've ingested
+  // (live OR preseed) so the idle loop can recycle the buffer when the
+  // runtime stops emitting fresh events. isReplaying surfaces the REPLAY
+  // label per CONSTITUTION Rule 3 — honest labeling of replayed operation.
+  const queueRef = useRef<AgentHandoffEvent[]>([]);
+  const replayLogRef = useRef<AgentHandoffEvent[]>([]);
+  const lastEnqueueAtRef = useRef<number>(performance.now());
+  const [isReplaying, setIsReplaying] = useState(false);
+  const isReplayingRef = useRef(false);
 
   /** Push a handoff onto the visual pipeline: particle + card + flash. */
   function ingestHandoff(handoff: AgentHandoffEvent) {
@@ -186,6 +241,33 @@ export function AgentFloor() {
     cardTimeoutsRef.current.set(handoff.id, tid);
   }
 
+  /**
+   * Push a handoff onto the paced queue + replay log. Called by both the
+   * preseed and live SSE branches; the dispatch interval below drains the
+   * head into `ingestHandoff` at HANDOFF_PACE_MS. A fresh live event that
+   * arrives mid-replay (i.e. while `isReplayingRef.current === true`) exits
+   * replay mode: the next dispatch tick will be a live handoff, and the
+   * REPLAY label is hidden.
+   */
+  function enqueueHandoff(handoff: AgentHandoffEvent, source: 'live' | 'preseed') {
+    queueRef.current.push(handoff);
+    replayLogRef.current.push(handoff);
+    // Cap the replay log FIFO so it doesn't grow unbounded over long sessions.
+    if (replayLogRef.current.length > REPLAY_LOG_CAP) {
+      replayLogRef.current.splice(0, replayLogRef.current.length - REPLAY_LOG_CAP);
+    }
+    if (source === 'live') {
+      lastEnqueueAtRef.current = performance.now();
+      // A genuine live event arriving mid-replay means we're no longer in
+      // replay mode — flip back to LIVE silently. The dispatch loop will
+      // start emitting the fresh event on its next tick.
+      if (isReplayingRef.current) {
+        isReplayingRef.current = false;
+        setIsReplaying(false);
+      }
+    }
+  }
+
   // SSE subscription — `event: handoff` (live) + `event: handoff-preseed`
   // (initial replay). The existing /api/wire/stream route already emits
   // both event types — we just consume them.
@@ -202,7 +284,7 @@ export function AgentFloor() {
         if (msg.event !== 'handoff' && msg.event !== 'handoff-preseed') return;
         try {
           const handoff = JSON.parse(msg.data) as AgentHandoffEvent;
-          ingestHandoff(handoff);
+          enqueueHandoff(handoff, msg.event === 'handoff' ? 'live' : 'preseed');
         } catch {
           // Malformed payload — drop the frame.
         }
@@ -222,6 +304,38 @@ export function AgentFloor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Dispatch loop — drain one queued handoff into the visual pipeline every
+  // HANDOFF_PACE_MS. When the queue empties AND no fresh live event has
+  // arrived in REPLAY_IDLE_MS, copy the rolling replay log into the queue
+  // and flip into REPLAY mode (CONSTITUTION Rule 3 — labeled honestly in
+  // the bottom-right of the canvas).
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const queue = queueRef.current;
+      if (queue.length > 0) {
+        const next = queue.shift();
+        if (next) ingestHandoff(next);
+        return;
+      }
+      // Queue is empty. If we've been idle long enough and we have a
+      // replay buffer, recycle it.
+      const idleFor = performance.now() - lastEnqueueAtRef.current;
+      if (idleFor > REPLAY_IDLE_MS && replayLogRef.current.length > 0) {
+        queueRef.current = replayLogRef.current.slice();
+        // Reset the idle clock so we don't immediately re-trigger replay
+        // the moment the queue drains again. Fresh live events will
+        // overwrite this and exit replay mode via `enqueueHandoff`.
+        lastEnqueueAtRef.current = performance.now();
+        if (!isReplayingRef.current) {
+          isReplayingRef.current = true;
+          setIsReplaying(true);
+        }
+      }
+    }, HANDOFF_PACE_MS);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // d3-force simulation — pinned coords, gentle charge so the seven nodes
   // breathe rather than bouncing. forceCenter is intentionally absent
   // (every node is pinned via fx/fy).
@@ -233,6 +347,8 @@ export function AgentFloor() {
     for (const n of simNodesRef.current) {
       n.fx = cx + n.pin.x * span;
       n.fy = cy + n.pin.y * span;
+      n.x = n.fx;
+      n.y = n.fy;
     }
     const sim = forceSimulation<SimNode>(simNodesRef.current)
       .force('link', forceLink<SimNode, SimLink>(simLinksRef.current)
@@ -242,6 +358,17 @@ export function AgentFloor() {
       .force('y', forceY<SimNode>(cy).strength(0.04))
       .alpha(0.6)
       .alphaDecay(0.05);
+
+    // Snapshot the pinned positions for the HTML caption overlay. Since
+    // every node is pinned via fx/fy, the positions are stable from
+    // tick zero — we can read them immediately. (Captures the same
+    // (cx + pin.x*span, cy + pin.y*span) the canvas paint loop uses.)
+    const positions = {} as Record<AgentId, { x: number; y: number }>;
+    for (const n of simNodesRef.current) {
+      positions[n.id] = { x: n.fx ?? 0, y: n.fy ?? 0 };
+    }
+    setNodePositions(positions);
+
     return () => { sim.stop(); };
   }, [size.width, size.height]);
 
@@ -382,13 +509,11 @@ export function AgentFloor() {
         ctx.arc(n.x, n.y - 1, 2.5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Label — tracked-cap mono, just below the node.
-        const fontPx = isMobile ? 9 : 10;
-        ctx.font = `${fontPx}px "JetBrains Mono", "Menlo", monospace`;
-        ctx.fillStyle = `rgba(${COLOR_GOLD_WARM}, 0.78)`;
-        ctx.textAlign = 'left'; // drawTrackedCapsLabel re-centers manually
-        ctx.textBaseline = 'top';
-        drawTrackedCapsLabel(ctx, n.label, n.x, n.y + r + 8, fontPx, 0.12);
+        // The agent-name label was previously drawn in canvas; it's now
+        // rendered as part of the three-line HTML caption overlay
+        // anchored to (n.x, n.y + r) so we can mix tracked-cap
+        // parchment / mono slate / italic gold weights cleanly. See the
+        // <div> grid below.
       }
 
       raf = requestAnimationFrame(draw);
@@ -411,6 +536,67 @@ export function AgentFloor() {
           ref={canvasRef}
           aria-label="Agent graph — seven agents and the handoff streams between them"
         />
+
+        {/* Per-agent caption overlay (VPS treatment, 2026-05-11). Three
+            lines per node: display name (tracked-cap parchment), role
+            (mono slate), Gemini model attribution (italic gold). Each
+            <div> is absolute-positioned via `transform: translate(...)`
+            using the pinned (fx, fy) coords captured into `nodePositions`
+            on viewport resize. pointer-events-none so the captions don't
+            block any future canvas hover work. */}
+        {(Object.keys(nodePositions) as AgentId[]).map((agentId) => {
+          const pos = nodePositions[agentId];
+          if (!pos) return null;
+          const caption = AGENT_CAPTIONS[agentId];
+          if (!caption) return null;
+          // Place the caption block just below the node circle. The node
+          // radius is 30/40 (mobile/desktop); add an 8px gap and let the
+          // block grow downward from there. We center-translate the block
+          // horizontally for clean alignment.
+          const yOffset = pos.y + nodeRadius + 10;
+          return (
+            <div
+              key={agentId}
+              className="pointer-events-none absolute z-[5] flex flex-col items-center text-center"
+              style={{
+                left: 0,
+                top: 0,
+                transform: `translate(${pos.x}px, ${yOffset}px) translateX(-50%)`,
+                width: isMobile ? '120px' : '180px',
+              }}
+            >
+              <p
+                className="font-mono uppercase text-parchment"
+                style={{
+                  fontSize: isMobile ? '9px' : '10px',
+                  letterSpacing: '0.18em',
+                  lineHeight: 1.2,
+                }}
+              >
+                {caption.display}
+              </p>
+              <p
+                className="mt-1 font-mono uppercase text-slate-room"
+                style={{
+                  fontSize: isMobile ? '8.5px' : '9.5px',
+                  letterSpacing: '0.12em',
+                  lineHeight: 1.3,
+                }}
+              >
+                {caption.role}
+              </p>
+              <p
+                className="mt-0.5 font-italic italic text-gold-warm/85"
+                style={{
+                  fontSize: isMobile ? '9.5px' : '10.5px',
+                  lineHeight: 1.3,
+                }}
+              >
+                {caption.model}
+              </p>
+            </div>
+          );
+        })}
       </div>
 
       {/* Bottom-right tool-call card stack. AnimatePresence drives the
@@ -426,6 +612,24 @@ export function AgentFloor() {
             <ToolCallCard key={handoff.id} handoff={handoff} />
           ))}
         </AnimatePresence>
+      </div>
+
+      {/* REPLAY label — CONSTITUTION Rule 3 honest-labeling contract. Only
+          rendered while the dispatch loop is consuming from the rolling
+          replay log (no fresh live events have arrived in REPLAY_IDLE_MS). */}
+      <div
+        aria-hidden={!isReplaying}
+        className={`pointer-events-none absolute bottom-4 right-4 z-20 flex items-center gap-2 transition-opacity duration-500 ${
+          isReplaying ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-gold-warm/60 animate-pulse" />
+        <span
+          className="font-mono text-mono-sm uppercase text-wire-time"
+          style={{ letterSpacing: '0.22em' }}
+        >
+          REPLAY · RECORDED OPERATION
+        </span>
       </div>
     </div>
   );
