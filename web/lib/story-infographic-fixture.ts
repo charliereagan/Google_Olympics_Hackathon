@@ -123,10 +123,153 @@ export const STORY_INFOGRAPHICS: Record<string, StoryInfographic> = {
       },
     ],
   },
-  // Mount Pleasant, Park City, Colorado Springs — slots reserved for
-  // the next iteration. Intentionally absent; `getInfographic` returns
-  // null and `<BroadcastPage>` renders no infographic block until VPS's
-  // hand-authored data lands here.
+  // Mount Pleasant, Iowa — fixture story, wrestling room + adaptive
+  // sport pipeline in a small Henry County town. VPS Session 2 data,
+  // §2 of Docs/VPS/story-infographic-data.md.
+  'fixture-mount-pleasant': {
+    sport_tags: ['wrestling', 'adaptive sport', 'Olympic and Paralympic'],
+    big_numbers: [
+      {
+        value: '8',
+        label: 'Olympians and Paralympians from Henry County since 1972',
+      },
+      {
+        value: '8,500',
+        label: 'Population of Mount Pleasant',
+      },
+      {
+        value: '3',
+        label: 'Generations of wrestling coaching lineage',
+      },
+    ],
+    timeline: [
+      {
+        year: '1968',
+        label: 'High school wrestling room enters continuous use',
+      },
+      {
+        year: '1972',
+        label: 'First Olympian from Mount Pleasant',
+      },
+      {
+        year: '1988',
+        label: 'Second Olympian — pattern starts to take shape',
+      },
+      {
+        year: '2004',
+        label: 'Community college adaptive sport program founded',
+      },
+      {
+        year: '2020',
+        label: 'First Paralympian sent to the Games (Tokyo cycle)',
+      },
+    ],
+    place_markers: [
+      {
+        place: 'Mount Pleasant, Iowa',
+        role: 'Population 8,500 · the wrestling room and the courthouse square',
+      },
+      {
+        place: 'Henry County, Iowa',
+        role:
+          '20,000-person county that produced eight Olympians and Paralympians',
+      },
+      {
+        place: 'Iowa Wesleyan, Mount Pleasant',
+        role: 'Adaptive athletics program · three counties served · 2004–2023',
+      },
+    ],
+    resources: [
+      {
+        label: 'Mount Pleasant Community School District',
+        url: 'https://mtpcsd.org',
+      },
+      {
+        label: 'Henry County, Iowa · official county government',
+        url: 'https://henrycounty.iowa.gov/',
+      },
+      {
+        label: 'Quad-City Times · hometown coverage',
+        url: 'https://qctimes.com/',
+      },
+      {
+        label: 'Olympedia · Team USA historical results',
+        url: 'https://www.olympedia.org',
+      },
+    ],
+  },
+  // Park City, Utah — fixture story, winter mountain town anchored to
+  // the Olympic Winter Games Salt Lake City 2002 legacy. VPS Session 2
+  // data, §3 of Docs/VPS/story-infographic-data.md. (VPS flagged the
+  // section as drafted without full transcript; Charlie authorized
+  // shipping as-is.)
+  'fixture-park-city-utah': {
+    sport_tags: [
+      'alpine skiing',
+      'snowboarding',
+      'bobsled',
+      'Olympic Winter and Paralympic Winter',
+    ],
+    big_numbers: [
+      {
+        value: '1:00 PM',
+        label:
+          'School-day dismissal during winter season — schedule bent around the chairlift',
+      },
+      {
+        value: '2002',
+        label:
+          'Olympic Winter Games and Paralympic Winter Games Salt Lake City — alpine and freestyle events hosted in Park City',
+      },
+    ],
+    timeline: [
+      {
+        year: '1992',
+        label: 'Utah Olympic Park opens as a training facility',
+      },
+      {
+        year: '2002',
+        label:
+          'Olympic Winter Games Salt Lake City — Park City hosts alpine and freestyle events',
+      },
+      {
+        year: '2026',
+        label:
+          'A generation of athletes whose first Games memory is the 2002 cycle, now mid-career',
+      },
+    ],
+    place_markers: [
+      {
+        place: 'Park City, Utah',
+        role:
+          'Mountain town where the public-school calendar bends around the chairlift schedule',
+      },
+      {
+        place: 'Utah Olympic Park, Park City',
+        role:
+          'Legacy training facility for bobsled, luge, ski jump, freestyle aerials',
+      },
+      {
+        place: 'Park City School District',
+        role:
+          'Public schools running early dismissal during the winter competition season',
+      },
+    ],
+    resources: [
+      {
+        label: 'Utah Olympic Park · public training facility',
+        url: 'https://utaholympiclegacy.org/',
+      },
+      {
+        label: 'Park City School District',
+        url: 'https://www.pcschools.us/',
+      },
+      {
+        label: 'Olympedia · Winter Games results archive',
+        url: 'https://www.olympedia.org',
+      },
+    ],
+  },
 };
 
 /**
