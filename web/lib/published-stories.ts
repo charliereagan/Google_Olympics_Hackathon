@@ -15,14 +15,31 @@
 import { ALL_FIXTURE_STORIES, type BroadcastStory } from '@/lib/story-fixture';
 import { getFirestore } from '@/lib/firestore-admin';
 
-const MAX_RECENT = 6;
+// Pull a wider window so that even if Firestore picks up surprise writes
+// (e.g. a runtime re-deploy emits a few orphan docs without hero images),
+// the gate below has plenty of qualifying candidates to choose from.
+const MAX_RECENT = 12;
 
+/**
+ * Demo-safety gate. An organic story must carry every field the home-page
+ * hero and the Stack depend on — INCLUDING a non-empty `hero_image_url` —
+ * before it can enter the candidate pool. Stories without a hero image
+ * cause a blank-hero regression on `/`, and there's no graceful fallback
+ * (the gradient placeholder reads as broken on the cinematic homepage).
+ *
+ * The agent-runtime Cloud Run service was deleted post-submission so this
+ * gate is defense-in-depth: if anything ever writes a partial doc into
+ * `published_stories`, it's silently filtered out of the homepage feed.
+ * (Submission day 2026-05-11.)
+ */
 function isUsableStory(data: Partial<BroadcastStory>): boolean {
   return (
     typeof data.headline === 'string' &&
     typeof data.kicker_place === 'string' &&
     typeof data.published_at === 'string' &&
-    typeof data.dek === 'string'
+    typeof data.dek === 'string' &&
+    typeof data.hero_image_url === 'string' &&
+    data.hero_image_url.length > 0
   );
 }
 
