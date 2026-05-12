@@ -10,7 +10,7 @@ Submission to the **Team USA × Google Cloud Hackathon** · Challenge 2 — *The
 
 ## Live URL
 
-🔴 **[storytellers-room.run.app](https://web-PLACEHOLDER.us-central1.run.app)** *(public URL pinned at submission)*
+🔴 **[https://web-615585524733.us-central1.run.app](https://web-615585524733.us-central1.run.app)**
 
 Demo video: see Devpost submission.
 
@@ -37,6 +37,60 @@ The protagonist class is **place, program, pattern** — never the individual at
 | Broadcast | `/story/[id]` | Full story page — stylized hero, Algenib narration, verified claims, audit signature |
 | The Gate | `/publish-gate` | NIL Redaction Layer audit, disambiguation showcase |
 | Investigation | `/investigation/[id]` | Live compressed-time view of your submitted seed prompt being investigated |
+
+## Testing & verification
+
+**Fastest path:** open the [live URL](https://web-615585524733.us-central1.run.app) above and click through the surfaces. No setup required.
+
+### Demo-moment quick links
+
+| Moment | URL on the live site |
+|---|---|
+| Cinematic hero + broadcast narration + infographic | [`/story/organic-CcBLDJv0y0mLzmWpQF5W`](https://web-615585524733.us-central1.run.app/story/organic-CcBLDJv0y0mLzmWpQF5W) (Minnesota) |
+| Seven-agent ADK orchestration | [`/floor`](https://web-615585524733.us-central1.run.app/floor) |
+| NIL Redaction Layer audit | [`/publish-gate`](https://web-615585524733.us-central1.run.app/publish-gate) |
+| Live agent feed with Gemini-model attribution | [`/wire`](https://web-615585524733.us-central1.run.app/wire) |
+| Stylized US map of Olympian/Paralympian production | [`/map`](https://web-615585524733.us-central1.run.app/map) |
+
+### Run the test suite locally
+
+```bash
+git clone https://github.com/charliereagan/Google_Olympics_Hackathon.git
+cd Google_Olympics_Hackathon
+
+# Python — agent runtime + NIL Layer + chain probes
+pytest -x
+
+# Next.js — type safety + lint
+npm --prefix web ci
+npm --prefix web run typecheck
+npm --prefix web run lint
+```
+
+### Run the frontend locally
+
+```bash
+cd web
+npm ci
+npm run dev                         # → http://localhost:3000
+```
+
+The frontend reads from Firestore via Application Default Credentials. For the live organic story and audit data:
+
+```bash
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT=predictive-fx-495200-j4
+```
+
+Without GCP credentials the frontend falls back to in-repo story fixtures — the homepage, three fixture broadcast pages, `/map`, `/field`, and `/floor` all still render normally (the NIL Redaction Layer audit panel falls back to fixture data too).
+
+### What success looks like
+
+- `pytest -x` — all suites green (Python 3.11+)
+- `npm run typecheck` — zero TypeScript errors (strict mode)
+- `npm run lint` — zero ESLint errors
+- Visiting `/` after `npm run dev` — full homepage with hero, story stack, ambient ticker
+- Visiting `/floor` — particle handoffs traveling along edges every ~1.5s, GCP-service-labeled tool cards stacking on the right, REPLAY label fading in after ~60s of agent-runtime idle (per CONSTITUTION Rule 3)
 
 ## Architecture
 
