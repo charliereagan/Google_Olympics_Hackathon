@@ -90,7 +90,7 @@ Without GCP credentials the frontend falls back to in-repo story fixtures — th
 - `npm run typecheck` — zero TypeScript errors (strict mode)
 - `npm run lint` — zero ESLint errors
 - Visiting `/` after `npm run dev` — full homepage with hero, story stack, ambient ticker
-- Visiting `/floor` — particle handoffs traveling along edges every ~1.5s, GCP-service-labeled tool cards stacking on the right, REPLAY label fading in after ~60s of agent-runtime idle (per CONSTITUTION Rule 3)
+- Visiting `/floor` — particle handoffs traveling along edges every ~1.5s, GCP-service-labeled tool cards stacking on the right, REPLAY label fading in after ~60s of agent-runtime idle (every event labeled `live | replay | published` per the project's honesty contract)
 
 ## Architecture
 
@@ -147,18 +147,7 @@ scripts/               ops + tests
   seed_equity_editor_demo.py   Equity Editor intervention demo seed
   run_bounded_batch.sh         bounded organic-op driver
 tests/                 pytest suite (340+ tests passing)
-Docs/                  Engineering + VPS handoffs + refinement reviews
 ```
-
-## Documents
-
-- [`CONSTITUTION.md`](CONSTITUTION.md) — creative + architectural principles
-- [`PROJECT_BRIEF.md`](PROJECT_BRIEF.md) — legal, compliance, submission requirements (authoritative on rules)
-- [`What_is_The_Storytellers_Room.md`](What_is_The_Storytellers_Room.md) — vision narrative
-- [`Docs/Engineering/BUILD_SPEC.md`](Docs/Engineering/BUILD_SPEC.md) — tactical implementation spec
-- [`Docs/Engineering/HOE-HANDOFF.md`](Docs/Engineering/HOE-HANDOFF.md) — engineering institutional memory
-- [`Docs/Engineering/design-system.md`](Docs/Engineering/design-system.md) — design tokens + visual contract
-- [`Docs/VPS/VPS-HANDOFF.md`](Docs/VPS/VPS-HANDOFF.md) — strategic decisions log
 
 ## License
 

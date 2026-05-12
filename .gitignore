@@ -85,3 +85,11 @@ Docs/Engineering/refinement/**/*.gif
 Docs/Engineering/refinement/**/*.webp
 # Keep review.md files
 !Docs/Engineering/refinement/**/review.md
+
+# Private docs (untracked 2026-05-11 — kept on disk locally, not in public repo)
+/CLAUDE.md
+/CONSTITUTION.md
+/DEPLOYMENT.md
+/PROJECT_BRIEF.md
+/What_is_The_Storytellers_Room.md
+/Docs/
